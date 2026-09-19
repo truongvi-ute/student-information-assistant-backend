@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17.11
+    container_name: sia-postgres
+
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "117"
+      POSTGRES_DB: sia_db
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - sia-postgres-volume:/var/lib/postgresql/data
+
+volumes:
+  sia-postgres-volume:
+    name: sia-postgres-volume
