@@ -3,10 +3,14 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.Duration;
 import org.springframework.stereotype.Service;
+
+import vn.hcmute.edu.sia.dto.OtpVerificationResult;
 import vn.hcmute.edu.sia.dto.PendingRegistration;
 import vn.hcmute.edu.sia.dto.request.RegisterRequest;
 import vn.hcmute.edu.sia.dto.response.OtpResendCooldownResponse;
 import vn.hcmute.edu.sia.enums.OtpPurpose;
+import vn.hcmute.edu.sia.enums.OtpVerificationStatus;
+import vn.hcmute.edu.sia.exception.OtpVerificationLockedException;
 import vn.hcmute.edu.sia.repository.AccountRepository;
 import vn.hcmute.edu.sia.repository.PendingRegistrationRepository;
 import vn.hcmute.edu.sia.repository.MajorRepository;
@@ -94,16 +98,19 @@ public class RegisterServiceImpl implements RegisterService {
                                         "Pending registration not found or expired."
                                 )
                         );
-        boolean otpValid = otpService.verifyOtp(
-                normalizedEmail,
-                OtpPurpose.REGISTER,
-                otp
-        );
+        OtpVerificationResult otpResult = otpService.verifyOtp(normalizedEmail, OtpPurpose.REGISTER, otp);
 
-        if (!otpValid) {
-            throw new IllegalArgumentException(
-                    "OTP is invalid or expired."
-            );
+        if (otpResult.status() == OtpVerificationStatus.LOCKED) {
+                throw new OtpVerificationLockedException(
+                        "OTP verification is temporarily locked.",
+                        otpResult.lockRemainingSeconds()
+                );
+        }
+
+        if (otpResult.status() == OtpVerificationStatus.INVALID) {
+                throw new IllegalArgumentException(
+                        "OTP is invalid or expired."
+                );
         }
 
         if (accountRepository.existsByEmail(normalizedEmail)) {
