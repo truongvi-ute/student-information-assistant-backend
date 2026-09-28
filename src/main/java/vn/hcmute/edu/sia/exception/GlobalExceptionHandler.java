@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import vn.hcmute.edu.sia.dto.response.ApiErrorResponse;
+import vn.hcmute.edu.sia.dto.response.OtpVerificationLockResponse;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -50,6 +51,20 @@ public class GlobalExceptionHandler {
                 message
         );
     }
+    @ExceptionHandler(OtpVerificationLockedException.class)
+    public ResponseEntity<OtpVerificationLockResponse> handleOtpVerificationLocked(
+           OtpVerificationLockedException exception
+    ) {
+        OtpVerificationLockResponse response =
+        new OtpVerificationLockResponse(
+                exception.getMessage(),
+                exception.getLockRemainingSeconds()
+        );
+
+        return ResponseEntity
+                .status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(response);
+        }
 
     private ResponseEntity<ApiErrorResponse> buildErrorResponse(
             HttpStatus status,

@@ -6,7 +6,9 @@ import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 
+import vn.hcmute.edu.sia.dto.OtpVerificationResult;
 import vn.hcmute.edu.sia.enums.OtpPurpose;
+import vn.hcmute.edu.sia.enums.OtpVerificationStatus;
 import vn.hcmute.edu.sia.repository.OtpRepository;
 import vn.hcmute.edu.sia.service.OtpService;
 
@@ -58,44 +60,85 @@ public class OtpServiceImpl implements OtpService{
     }
 
     @Override
-    public boolean verifyOtp(String email, OtpPurpose purpose, String otp) {
+    public OtpVerificationResult verifyOtp(String email, OtpPurpose purpose, String otp) {
+        // Đã bị khóa từ trước
         if (otpRepository.isVerificationLocked(email, purpose)) {
-            return false;
+            Duration lockRemaining =
+                    otpRepository.getVerificationLockRemaining(
+                            email,
+                            purpose
+                    );
+
+            return new OtpVerificationResult(
+                    OtpVerificationStatus.LOCKED,
+                    lockRemaining.toSeconds()
+            );
         }
+
         Optional<String> storedOtp = otpRepository.findOtp(email, purpose);
 
+        // OTP không tồn tại hoặc đã hết hạn
         if (storedOtp.isEmpty()) {
-            return false;
+            return new OtpVerificationResult(
+                    OtpVerificationStatus.INVALID,
+                    0
+            );
         }
 
+        // OTP sai
         if (!storedOtp.get().equals(otp)) {
-            long failedAttempts = otpRepository.incrementFailedAttempts(
+
+            long failedAttempts =
+                    otpRepository.incrementFailedAttempts(
                             email,
                             purpose,
                             FAILED_ATTEMPTS_TTL
                     );
+
+            // Sai đủ số lần cho phép -> khóa
             if (failedAttempts >= MAX_FAILED_ATTEMPTS) {
+
                 otpRepository.lockVerification(
                         email,
                         purpose,
                         VERIFICATION_LOCK_TTL
                 );
+
                 otpRepository.clearFailedAttempts(
                         email,
                         purpose
                 );
+
+                Duration lockRemaining =
+                        otpRepository.getVerificationLockRemaining(
+                                email,
+                                purpose
+                        );
+
+                return new OtpVerificationResult(
+                        OtpVerificationStatus.LOCKED,
+                        lockRemaining.toSeconds()
+                );
             }
-            return false;
+
+            return new OtpVerificationResult(
+                    OtpVerificationStatus.INVALID,
+                    0
+            );
         }
-        otpRepository.deleteOtp(
-                email,
-                purpose
-        );
+
+        // OTP đúng -> one-time use
+        otpRepository.deleteOtp(email, purpose);
+
         otpRepository.clearFailedAttempts(
                 email,
                 purpose
         );
-        return true;
+
+        return new OtpVerificationResult(
+                OtpVerificationStatus.VERIFIED,
+                0
+        );
     }
 
     @Override
@@ -104,6 +147,16 @@ public class OtpServiceImpl implements OtpService{
                 email,
                 purpose
         );
+    }
+
+    @Override
+    public Duration getResendCooldownRemaining(String email, OtpPurpose purpose) {
+         return otpRepository.getResendCooldownRemaining(email, purpose);
+    }
+
+    @Override
+    public Duration getVerificationLockRemaining(String email, OtpPurpose purpose) {
+        return otpRepository.getVerificationLockRemaining(email, purpose);
     }
     //helper
     private String generateOtp() {
