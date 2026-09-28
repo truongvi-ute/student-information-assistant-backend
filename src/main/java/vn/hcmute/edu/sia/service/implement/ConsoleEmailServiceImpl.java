@@ -1,7 +1,10 @@
 package vn.hcmute.edu.sia.service.implement;
 
+import org.springframework.stereotype.Service;
+
 import vn.hcmute.edu.sia.service.EmailService;
 
+@Service
 public class ConsoleEmailServiceImpl implements EmailService {
 
     @Override
