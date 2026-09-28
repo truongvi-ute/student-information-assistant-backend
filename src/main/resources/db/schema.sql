@@ -69,20 +69,18 @@ CREATE TABLE departments (
 
 
 CREATE TABLE student_profiles (
-	student_profile_id UUID,
-	student_id UUID NOT NULL,
+	student_id UUID,
 	major_id UUID,
 	education_system_id UUID,
 	cohort_id UUID,
-	note TEXT,
+	academic_context TEXT,
 
-	CONSTRAINT pk_student_profiles PRIMARY KEY (student_profile_id),
-	CONSTRAINT uq_student_profiles_student_id UNIQUE (student_id),
+	CONSTRAINT pk_student_profiles PRIMARY KEY (student_id),
 
-	CONSTRAINT fk_student_profiles_student_id
-		FOREIGN KEY (student_id)
-		REFERENCES users(user_id)
-		ON DELETE CASCADE,
+    CONSTRAINT fk_student_profiles_student_id
+        FOREIGN KEY (student_id)
+        REFERENCES users(user_id)
+        ON DELETE CASCADE,
 
 	CONSTRAINT fk_student_profiles_major_id
 		FOREIGN KEY (major_id)
