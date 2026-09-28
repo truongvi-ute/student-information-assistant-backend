@@ -105,6 +105,16 @@ public class OtpServiceImpl implements OtpService{
                 purpose
         );
     }
+
+    @Override
+    public Duration getResendCooldownRemaining(String email, OtpPurpose purpose) {
+         return otpRepository.getResendCooldownRemaining(email, purpose);
+    }
+
+    @Override
+    public Duration getVerificationLockRemaining(String email, OtpPurpose purpose) {
+        return otpRepository.getVerificationLockRemaining(email, purpose);
+    }
     //helper
     private String generateOtp() {
         int number = secureRandom.nextInt(1_000_000);

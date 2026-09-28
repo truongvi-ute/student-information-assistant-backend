@@ -2,6 +2,7 @@ package vn.hcmute.edu.sia.repository.implement;
 
 import java.time.Duration;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;
@@ -64,7 +65,14 @@ public class RedisOtpRepository implements OtpRepository {
     public boolean isVerificationLocked(String email, OtpPurpose purpose) {
         return Boolean.TRUE.equals(redisTemplate.hasKey(lockKey(email, purpose)));
     }
-
+    @Override
+    public Duration getResendCooldownRemaining(String email, OtpPurpose purpose) {
+        return getRemainingTtl(resendKey(email, purpose));
+    }
+    @Override
+    public Duration getVerificationLockRemaining(String email, OtpPurpose purpose) {
+        return getRemainingTtl(lockKey(email, purpose));
+    }
     //helper
     private String otpKey (String email, OtpPurpose purpose){
         return "otp:%s:%s".formatted(purpose.name().toLowerCase(), normalizeEmail(email));
@@ -80,5 +88,14 @@ public class RedisOtpRepository implements OtpRepository {
     }
     private String normalizeEmail(String email) {
         return email.trim().toLowerCase();
+    }
+    private Duration getRemainingTtl(String key) {
+        Long remainingSeconds = redisTemplate.getExpire(key, TimeUnit.SECONDS);
+
+        if (remainingSeconds == null || remainingSeconds <= 0) {
+            return Duration.ZERO;
+        }
+
+        return Duration.ofSeconds(remainingSeconds);
     }
 }

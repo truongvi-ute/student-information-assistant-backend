@@ -24,4 +24,8 @@ public interface OtpRepository {
     void lockVerification(String email, OtpPurpose purpose, Duration ttl);
     // Kiểm tra việc xác thực OTP có đang bị khóa không
     boolean isVerificationLocked(String email, OtpPurpose purpose);
+    // Thời gian còn lại để resend OTP
+    Duration getResendCooldownRemaining(String email, OtpPurpose purpose);
+    // Thời gian còn bị khóa xác thực OTP
+    Duration getVerificationLockRemaining(String email, OtpPurpose purpose);
 }

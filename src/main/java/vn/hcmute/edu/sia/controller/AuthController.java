@@ -8,6 +8,7 @@ import jakarta.validation.Valid;
 
 import vn.hcmute.edu.sia.dto.request.RegisterRequest;
 import vn.hcmute.edu.sia.dto.request.VerifyRegisterOtpRequest;
+import vn.hcmute.edu.sia.dto.response.OtpResendCooldownResponse;
 import vn.hcmute.edu.sia.service.RegisterService;
 
 @RestController
@@ -21,14 +22,14 @@ public class AuthController {
     }
 
     @PostMapping("/register")
-    public ResponseEntity<Void> register(
+    public ResponseEntity<OtpResendCooldownResponse> register(
             @Valid @RequestBody RegisterRequest request
     ) {
-        registerService.startRegistration(request);
+        OtpResendCooldownResponse response = registerService.startRegistration(request);
 
         return ResponseEntity
                 .status(HttpStatus.ACCEPTED)
-                .build();
+                .body(response);
     }
 
     @PostMapping("/register/verify")

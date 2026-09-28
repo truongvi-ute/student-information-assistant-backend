@@ -1,5 +1,7 @@
 package vn.hcmute.edu.sia.service;
 
+import java.time.Duration;
+
 import vn.hcmute.edu.sia.enums.OtpPurpose;
 
 public interface OtpService {
@@ -8,5 +10,9 @@ public interface OtpService {
     //Xác minh xem OTP có hợp lệ không
     boolean verifyOtp (String email, OtpPurpose purpose, String otp);
     //Vô hiệu hóa OTP 
-    void invalidateOtp (String email, OtpPurpose purpose);    
+    void invalidateOtp (String email, OtpPurpose purpose); 
+    // Thời gian còn lại để resend OTP   
+    Duration getResendCooldownRemaining(String email, OtpPurpose purpose);
+    // Thời gian còn lại bị khóa xác thực OTP
+    Duration getVerificationLockRemaining(String email, OtpPurpose purpose);
 }
