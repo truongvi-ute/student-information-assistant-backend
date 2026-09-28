@@ -5,6 +5,7 @@ import java.util.UUID;
 
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.jspecify.annotations.Nullable;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -87,5 +88,30 @@ public abstract class Account {
         }
 
         return email.trim().toLowerCase();
+    }
+
+    public AccountAccessStatus getAccessStatus() {
+        return accessStatus;
+    }
+
+    public String getPasswordHash(){
+        return passwordHash;
+    }
+
+    public AccountRole getRole() {
+        return role;
+    }
+    
+    public boolean isPasswordChangeRequired() {
+        return passwordChangeRequired;
+    }
+
+    public UUID getId(){
+        return id;
+    }
+
+    public String getEmail()
+    {
+        return email;
     }
 }

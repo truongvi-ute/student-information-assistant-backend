@@ -4,30 +4,47 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+
+import vn.hcmute.edu.sia.security.JwtAuthenticationFilter;
 
 @Configuration
 public class SecurityConfig {
 
-    @Bean
-    public SecurityFilterChain securityFilterChain(
-            HttpSecurity http
-    ) throws Exception {
+        private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
-        http
+        public SecurityConfig(
+                JwtAuthenticationFilter jwtAuthenticationFilter
+        ) {
+                this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        }
+
+        @Bean
+        public SecurityFilterChain securityFilterChain(
+                HttpSecurity http
+        ) throws Exception {
+
+                http
                 .csrf(csrf -> csrf.disable())
 
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
-                                "/api/auth/register",
-                                "/api/auth/register/verify"
+                        "/api/auth/register",
+                        "/api/auth/register/verify",
+                        "/api/auth/login"
                         ).permitAll()
 
                         .anyRequest().authenticated()
                 )
 
                 .formLogin(form -> form.disable())
-                .httpBasic(httpBasic -> httpBasic.disable());
+                .httpBasic(httpBasic -> httpBasic.disable())
 
-        return http.build();
-    }
+                .addFilterBefore(
+                        jwtAuthenticationFilter,
+                        UsernamePasswordAuthenticationFilter.class
+                );
+
+                return http.build();
+        }
 }
