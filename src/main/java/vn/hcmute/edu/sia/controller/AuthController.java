@@ -99,9 +99,7 @@ public class AuthController {
                 @Valid @RequestBody ResetPasswordRequest request
         ) {
                 MessageResponse response =
-                        new MessageResponse(
-                                "Password has been reset. Please login again."
-                        );
+                        forgotPasswordService.resetPassword(request);
 
                 return ResponseEntity.ok(response);
         }

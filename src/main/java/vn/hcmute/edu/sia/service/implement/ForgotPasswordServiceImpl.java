@@ -4,13 +4,16 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.Base64;
 
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import vn.hcmute.edu.sia.dto.OtpVerificationResult;
 import vn.hcmute.edu.sia.dto.request.ForgotPasswordRequest;
+import vn.hcmute.edu.sia.dto.request.ResetPasswordRequest;
 import vn.hcmute.edu.sia.dto.request.VerifyForgotPasswordOtpRequest;
 import vn.hcmute.edu.sia.dto.response.ForgotPasswordOtpVerificationResponse;
 import vn.hcmute.edu.sia.dto.response.ForgotPasswordResponse;
+import vn.hcmute.edu.sia.dto.response.MessageResponse;
 import vn.hcmute.edu.sia.entity.Account;
 import vn.hcmute.edu.sia.enums.AccountAccessStatus;
 import vn.hcmute.edu.sia.enums.OtpPurpose;
@@ -21,6 +24,7 @@ import vn.hcmute.edu.sia.repository.PasswordResetTokenRepository;
 import vn.hcmute.edu.sia.service.EmailService;
 import vn.hcmute.edu.sia.service.ForgotPasswordService;
 import vn.hcmute.edu.sia.service.OtpService;
+import vn.hcmute.edu.sia.validation.PasswordPolicy;
 
 @Service
 public class ForgotPasswordServiceImpl implements ForgotPasswordService {
@@ -34,18 +38,21 @@ public class ForgotPasswordServiceImpl implements ForgotPasswordService {
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final OtpService otpService;
     private final EmailService emailService;
+    private final PasswordEncoder passwordEncoder;
     private final SecureRandom secureRandom;
 
     public ForgotPasswordServiceImpl(
             AccountRepository accountRepository,
             PasswordResetTokenRepository passwordResetTokenRepository,
             OtpService otpService,
-            EmailService emailService
+            EmailService emailService,
+            PasswordEncoder passwordEncoder
     ) {
         this.accountRepository = accountRepository;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.otpService = otpService;
         this.emailService = emailService;
+        this.passwordEncoder = passwordEncoder;
         this.secureRandom = new SecureRandom();
     }
 
@@ -130,6 +137,51 @@ public class ForgotPasswordServiceImpl implements ForgotPasswordService {
         return new ForgotPasswordOtpVerificationResponse(
                 "OTP verified.",
                 resetToken
+        );
+    }
+
+    @Override
+    public MessageResponse resetPassword(ResetPasswordRequest request) {
+        String newPassword = request.newPassword();
+        PasswordPolicy.validate(newPassword);
+
+        if (!newPassword.equals(request.confirmPassword())) {
+            throw new IllegalArgumentException(
+                    "Confirm password does not match."
+            );
+        }
+
+        String email = passwordResetTokenRepository
+                .findEmailByToken(request.resetToken())
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Reset token is invalid or expired."
+                        )
+                );
+
+        Account account = accountRepository
+                .findByEmail(email)
+                .orElseThrow(() ->
+                        new IllegalArgumentException(
+                                "Reset token is invalid or expired."
+                        )
+                );
+
+        if (passwordEncoder.matches(newPassword, account.getPasswordHash())) {
+            throw new IllegalArgumentException(
+                    "New password must be different from current password."
+            );
+        }
+
+        String passwordHash = passwordEncoder.encode(newPassword);
+        account.resetPassword(passwordHash);
+
+        accountRepository.save(account);
+        passwordResetTokenRepository.delete(request.resetToken());
+        otpService.invalidateOtp(email, OtpPurpose.FORGOT_PASSWORD);
+
+        return new MessageResponse(
+                "Password has been reset. Please login again."
         );
     }
 
