@@ -163,3 +163,81 @@ Run container:
 ```bash
 docker run --name sia-backend-container -p 8080:8080 sia-backend
 ```
+
+## Forgot Password API
+
+Luồng quên mật khẩu là public và gồm 3 bước: gửi OTP, xác thực OTP để lấy reset token, sau đó đặt mật khẩu mới.
+
+### Gui OTP quen mat khau
+
+```http
+POST /api/auth/forgot-password
+Content-Type: application/json
+```
+
+```json
+{
+  "email": "student@example.com"
+}
+```
+
+Response thanh cong:
+
+```json
+{
+  "message": "Da gui ma OTP ve email neu ton tai.",
+  "resendAvailableInSeconds": 60
+}
+```
+
+Ghi chu: email khong ton tai van tra response chung de khong tiet lo thong tin tai khoan.
+
+### Xac thuc OTP quen mat khau
+
+```http
+POST /api/auth/forgot-password/verify
+Content-Type: application/json
+```
+
+```json
+{
+  "email": "student@example.com",
+  "otp": "123456"
+}
+```
+
+Response thanh cong:
+
+```json
+{
+  "message": "OTP verified.",
+  "resetToken": "reset-token"
+}
+```
+
+Loi thuong gap: OTP sai/het han tra `400`; sai qua so lan cho phep tra `429` kem `lockRemainingSeconds`.
+
+### Dat lai mat khau
+
+```http
+POST /api/auth/reset-password
+Content-Type: application/json
+```
+
+```json
+{
+  "resetToken": "reset-token",
+  "newPassword": "abc123",
+  "confirmPassword": "abc123"
+}
+```
+
+Response thanh cong:
+
+```json
+{
+  "message": "Password has been reset. Please login again."
+}
+```
+
+Loi thuong gap: reset token sai/het han, password khong dung policy, confirm password khong khop, hoac password moi trung password hien tai. Password moi can tu 6 den 72 ky tu va co it nhat 1 chu cai, 1 chu so.
