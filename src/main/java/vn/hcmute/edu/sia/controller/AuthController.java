@@ -89,10 +89,7 @@ public class AuthController {
                 @Valid @RequestBody VerifyForgotPasswordOtpRequest request
         ) {
                 ForgotPasswordOtpVerificationResponse response =
-                        new ForgotPasswordOtpVerificationResponse(
-                                "OTP verified.",
-                                ""
-                        );
+                        forgotPasswordService.verifyForgotPasswordOtp(request);
 
                 return ResponseEntity.ok(response);
         }
