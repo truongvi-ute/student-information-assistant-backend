@@ -15,6 +15,7 @@ import vn.hcmute.edu.sia.dto.response.ForgotPasswordOtpVerificationResponse;
 import vn.hcmute.edu.sia.dto.response.ForgotPasswordResponse;
 import vn.hcmute.edu.sia.dto.response.MessageResponse;
 import vn.hcmute.edu.sia.dto.response.OtpResendCooldownResponse;
+import vn.hcmute.edu.sia.service.ForgotPasswordService;
 import vn.hcmute.edu.sia.service.RegisterService;
 import vn.hcmute.edu.sia.service.LoginService;
 import vn.hcmute.edu.sia.dto.request.LoginRequest;
@@ -26,10 +27,16 @@ public class AuthController {
 
         private final RegisterService registerService;
         private final LoginService loginService;
+        private final ForgotPasswordService forgotPasswordService;
 
-        public AuthController(RegisterService registerService, LoginService loginService) {
+        public AuthController(
+                RegisterService registerService,
+                LoginService loginService,
+                ForgotPasswordService forgotPasswordService
+        ) {
                 this.registerService = registerService;
                 this.loginService = loginService;
+                this.forgotPasswordService = forgotPasswordService;
         }
 
         @PostMapping("/register")
@@ -70,10 +77,7 @@ public class AuthController {
                 @Valid @RequestBody ForgotPasswordRequest request
         ) {
                 ForgotPasswordResponse response =
-                        new ForgotPasswordResponse(
-                                "Da gui ma OTP ve email neu ton tai.",
-                                0
-                        );
+                        forgotPasswordService.startForgotPassword(request);
 
                 return ResponseEntity
                         .status(HttpStatus.ACCEPTED)
