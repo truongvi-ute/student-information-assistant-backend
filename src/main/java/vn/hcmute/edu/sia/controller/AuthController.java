@@ -6,8 +6,14 @@ import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
 
+import vn.hcmute.edu.sia.dto.request.ForgotPasswordRequest;
+import vn.hcmute.edu.sia.dto.request.ResetPasswordRequest;
+import vn.hcmute.edu.sia.dto.request.VerifyForgotPasswordOtpRequest;
 import vn.hcmute.edu.sia.dto.request.RegisterRequest;
 import vn.hcmute.edu.sia.dto.request.VerifyRegisterOtpRequest;
+import vn.hcmute.edu.sia.dto.response.ForgotPasswordOtpVerificationResponse;
+import vn.hcmute.edu.sia.dto.response.ForgotPasswordResponse;
+import vn.hcmute.edu.sia.dto.response.MessageResponse;
 import vn.hcmute.edu.sia.dto.response.OtpResendCooldownResponse;
 import vn.hcmute.edu.sia.service.RegisterService;
 import vn.hcmute.edu.sia.service.LoginService;
@@ -55,6 +61,46 @@ public class AuthController {
                 @Valid @RequestBody LoginRequest request
                 ) {
                 LoginResponse response = loginService.login(request);
+
+                return ResponseEntity.ok(response);
+        }
+
+        @PostMapping("/forgot-password")
+        public ResponseEntity<ForgotPasswordResponse> forgotPassword(
+                @Valid @RequestBody ForgotPasswordRequest request
+        ) {
+                ForgotPasswordResponse response =
+                        new ForgotPasswordResponse(
+                                "Da gui ma OTP ve email neu ton tai.",
+                                0
+                        );
+
+                return ResponseEntity
+                        .status(HttpStatus.ACCEPTED)
+                        .body(response);
+        }
+
+        @PostMapping("/forgot-password/verify")
+        public ResponseEntity<ForgotPasswordOtpVerificationResponse> verifyForgotPasswordOtp(
+                @Valid @RequestBody VerifyForgotPasswordOtpRequest request
+        ) {
+                ForgotPasswordOtpVerificationResponse response =
+                        new ForgotPasswordOtpVerificationResponse(
+                                "OTP verified.",
+                                ""
+                        );
+
+                return ResponseEntity.ok(response);
+        }
+
+        @PostMapping("/reset-password")
+        public ResponseEntity<MessageResponse> resetPassword(
+                @Valid @RequestBody ResetPasswordRequest request
+        ) {
+                MessageResponse response =
+                        new MessageResponse(
+                                "Password has been reset. Please login again."
+                        );
 
                 return ResponseEntity.ok(response);
         }
