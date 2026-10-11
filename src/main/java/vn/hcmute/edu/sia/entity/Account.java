@@ -98,6 +98,17 @@ public abstract class Account {
         return passwordHash;
     }
 
+    public void resetPassword(String newPasswordHash) {
+        if (newPasswordHash == null || newPasswordHash.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Password hash must not be blank"
+            );
+        }
+
+        this.passwordHash = newPasswordHash;
+        this.passwordChangeRequired = false;
+    }
+
     public AccountRole getRole() {
         return role;
     }
