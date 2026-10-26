@@ -11,10 +11,11 @@ import vn.hcmute.edu.sia.dto.request.ResetPasswordRequest;
 import vn.hcmute.edu.sia.dto.request.VerifyForgotPasswordOtpRequest;
 import vn.hcmute.edu.sia.dto.request.RegisterRequest;
 import vn.hcmute.edu.sia.dto.request.VerifyRegisterOtpRequest;
+import vn.hcmute.edu.sia.dto.request.ResendRegistrationOtpRequest;
 import vn.hcmute.edu.sia.dto.response.ForgotPasswordOtpVerificationResponse;
 import vn.hcmute.edu.sia.dto.response.ForgotPasswordResponse;
 import vn.hcmute.edu.sia.dto.response.MessageResponse;
-import vn.hcmute.edu.sia.dto.response.OtpResendCooldownResponse;
+import vn.hcmute.edu.sia.dto.response.RegistrationOtpResponse;
 import vn.hcmute.edu.sia.service.ForgotPasswordService;
 import vn.hcmute.edu.sia.service.RegisterService;
 import vn.hcmute.edu.sia.service.LoginService;
@@ -40,29 +41,35 @@ public class AuthController {
         }
 
         @PostMapping("/register")
-        public ResponseEntity<OtpResendCooldownResponse> register(
-                @Valid @RequestBody RegisterRequest request
-        ) {
-                OtpResendCooldownResponse response = registerService.startRegistration(request);
+        public ResponseEntity<RegistrationOtpResponse> register(
+                @Valid @RequestBody RegisterRequest request) {
+                RegistrationOtpResponse response = registerService.startRegistration(request);
 
                 return ResponseEntity
                         .status(HttpStatus.ACCEPTED)
                         .body(response);
         }
 
-        @PostMapping("/register/verify")
-        public ResponseEntity<Void> verifyRegistration(
-                @Valid @RequestBody VerifyRegisterOtpRequest request
-        ) {
-                registerService.verifyRegistration(
-                        request.email(),
-                        request.otp()
-                );
+        @PostMapping ("/register/resend-otp")
+        public ResponseEntity<RegistrationOtpResponse> resendRegistrationOtp(
+                @Valid @RequestBody ResendRegistrationOtpRequest request){
+                RegistrationOtpResponse response = registerService.resendRegistrationOtp(request.email());
+
+                return ResponseEntity
+                        .status(HttpStatus.ACCEPTED)
+                        .body(response);
+        }
+
+        @PostMapping("/register/verify-otp")
+        public ResponseEntity<Void> verifyRegistrationOtp(
+                @Valid @RequestBody VerifyRegisterOtpRequest request) {
+                registerService.verifyRegistrationOtp(request.email(), request.otp());
 
                 return ResponseEntity
                         .status(HttpStatus.CREATED)
                         .build();
         }
+
         @PostMapping("/login")
         public ResponseEntity<LoginResponse> login(
                 @Valid @RequestBody LoginRequest request
