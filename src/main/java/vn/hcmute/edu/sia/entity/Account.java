@@ -1,11 +1,13 @@
 package vn.hcmute.edu.sia.entity;
-import vn.hcmute.edu.sia.enums.*;
+import vn.hcmute.edu.sia.enums.AccountAccessStatus;
+import vn.hcmute.edu.sia.enums.AccountRole;
+import vn.hcmute.edu.sia.util.EmailNormalizer;
+
 import java.time.Instant;
 import java.util.UUID;
 
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
-import org.jspecify.annotations.Nullable;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -68,7 +70,7 @@ public abstract class Account {
             boolean passwordChangeRequired
     ) {
         this.fullName = normalizeFullName(fullName);
-        this.email = normalizeEmail(email);
+        this.email = EmailNormalizer.normalize(email);
         this.passwordHash = passwordHash;
         this.role = role;
         this.accessStatus = accessStatus;
@@ -80,14 +82,6 @@ public abstract class Account {
         }
 
         return fullName.trim();
-    }
-
-    private String normalizeEmail(String email) {
-        if (email == null || email.isBlank()) {
-            throw new IllegalArgumentException("Email must not be blank");
-        }
-
-        return email.trim().toLowerCase();
     }
 
     public AccountAccessStatus getAccessStatus() {

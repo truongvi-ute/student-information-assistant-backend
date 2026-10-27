@@ -6,6 +6,4 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import vn.hcmute.edu.sia.entity.EducationSystem;
 
-public interface EducationSystemRepository
-        extends JpaRepository<EducationSystem, UUID> {
-}
+public interface EducationSystemRepository extends JpaRepository<EducationSystem, UUID> {}

@@ -9,4 +9,5 @@ public record PendingRegistration(
         UUID majorId,
         UUID educationSystemId,
         UUID cohortId,
-        String academicContext) {}
+        String academicContext) {
+}

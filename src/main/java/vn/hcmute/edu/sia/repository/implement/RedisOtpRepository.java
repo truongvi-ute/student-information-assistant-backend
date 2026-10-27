@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
 
 import vn.hcmute.edu.sia.enums.OtpPurpose;
 import vn.hcmute.edu.sia.repository.OtpRepository;
+import vn.hcmute.edu.sia.util.EmailNormalizer;
 
 @Repository 
 public class RedisOtpRepository implements OtpRepository {
@@ -75,19 +76,16 @@ public class RedisOtpRepository implements OtpRepository {
     }
     //helper
     private String otpKey (String email, OtpPurpose purpose){
-        return "otp:%s:%s".formatted(purpose.name().toLowerCase(), normalizeEmail(email));
+        return "otp:%s:%s".formatted(purpose.name().toLowerCase(), EmailNormalizer.normalize(email));
     }
     private String resendKey (String email, OtpPurpose purpose){
-        return "otp:resend:%s:%s".formatted(purpose.name().toLowerCase(), normalizeEmail(email));
+        return "otp:resend:%s:%s".formatted(purpose.name().toLowerCase(), EmailNormalizer.normalize(email));
     }
     private String failedAttemptsKey (String email, OtpPurpose purpose){
-        return "otp:attempts:%s:%s".formatted(purpose.name().toLowerCase(), normalizeEmail(email));
+        return "otp:attempts:%s:%s".formatted(purpose.name().toLowerCase(), EmailNormalizer.normalize(email));
     }
     private String lockKey (String email, OtpPurpose purpose){
-        return "otp:lock:%s:%s".formatted(purpose.name().toLowerCase(), normalizeEmail(email));
-    }
-    private String normalizeEmail(String email) {
-        return email.trim().toLowerCase();
+        return "otp:lock:%s:%s".formatted(purpose.name().toLowerCase(), EmailNormalizer.normalize(email));
     }
     private Duration getRemainingTtl(String key) {
         Long remainingSeconds = redisTemplate.getExpire(key, TimeUnit.SECONDS);
