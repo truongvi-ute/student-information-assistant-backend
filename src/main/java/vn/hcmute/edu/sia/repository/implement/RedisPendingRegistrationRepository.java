@@ -9,6 +9,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import vn.hcmute.edu.sia.dto.PendingRegistration;
 import vn.hcmute.edu.sia.repository.PendingRegistrationRepository;
+import vn.hcmute.edu.sia.util.EmailNormalizer;
 
 @Repository
 public class RedisPendingRegistrationRepository implements PendingRegistrationRepository {
@@ -72,10 +73,6 @@ public class RedisPendingRegistrationRepository implements PendingRegistrationRe
     }
     //helper
     private String pendingRegistrationKey(String email) {
-        return "register:pending:" + normalizeEmail(email);
-    }
-
-    private String normalizeEmail(String email) {
-        return email.trim().toLowerCase();
+        return "register:pending:" + EmailNormalizer.normalize(email);
     }
 }

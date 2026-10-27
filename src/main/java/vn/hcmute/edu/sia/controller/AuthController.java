@@ -10,6 +10,7 @@ import vn.hcmute.edu.sia.dto.request.ForgotPasswordRequest;
 import vn.hcmute.edu.sia.dto.request.ResetPasswordRequest;
 import vn.hcmute.edu.sia.dto.request.VerifyForgotPasswordOtpRequest;
 import vn.hcmute.edu.sia.dto.request.RegisterRequest;
+import vn.hcmute.edu.sia.dto.request.ResendForgotPasswordOtpRequest;
 import vn.hcmute.edu.sia.dto.request.VerifyRegisterOtpRequest;
 import vn.hcmute.edu.sia.dto.request.ResendRegistrationOtpRequest;
 import vn.hcmute.edu.sia.dto.response.ForgotPasswordOtpVerificationResponse;
@@ -72,33 +73,40 @@ public class AuthController {
 
         @PostMapping("/login")
         public ResponseEntity<LoginResponse> login(
-                @Valid @RequestBody LoginRequest request
-                ) {
+                @Valid @RequestBody LoginRequest request) {
                 LoginResponse response = loginService.login(request);
 
-                return ResponseEntity.ok(response);
+                return ResponseEntity
+                        .status(HttpStatus.OK)
+                        .body(response);
         }
 
         @PostMapping("/forgot-password")
         public ResponseEntity<ForgotPasswordResponse> forgotPassword(
-                @Valid @RequestBody ForgotPasswordRequest request
-        ) {
-                ForgotPasswordResponse response =
-                        forgotPasswordService.startForgotPassword(request);
+                @Valid @RequestBody ForgotPasswordRequest request) {
+                ForgotPasswordResponse response = forgotPasswordService.startForgotPassword(request);
 
                 return ResponseEntity
                         .status(HttpStatus.ACCEPTED)
                         .body(response);
         }
+        @PostMapping("/forgot-password/resend-otp")
+        public ResponseEntity<ForgotPasswordResponse> resendForgotPasswordOtp (
+                @Valid @RequestBody ResendForgotPasswordOtpRequest request) {
+                ForgotPasswordResponse response = forgotPasswordService.resendForgotPasswordOtp(request.email());
+                return ResponseEntity
+                        .status(HttpStatus.ACCEPTED)
+                        .body(response);
+        }
 
-        @PostMapping("/forgot-password/verify")
+        @PostMapping("/forgot-password/verify-otp")
         public ResponseEntity<ForgotPasswordOtpVerificationResponse> verifyForgotPasswordOtp(
-                @Valid @RequestBody VerifyForgotPasswordOtpRequest request
-        ) {
-                ForgotPasswordOtpVerificationResponse response =
-                        forgotPasswordService.verifyForgotPasswordOtp(request);
+                @Valid @RequestBody VerifyForgotPasswordOtpRequest request) {
+                ForgotPasswordOtpVerificationResponse response = forgotPasswordService.verifyForgotPasswordOtp(request);
 
-                return ResponseEntity.ok(response);
+                return ResponseEntity
+                        .status(HttpStatus.OK)
+                        .body(response);
         }
 
         @PostMapping("/reset-password")
@@ -108,6 +116,8 @@ public class AuthController {
                 MessageResponse response =
                         forgotPasswordService.resetPassword(request);
 
-                return ResponseEntity.ok(response);
+                return ResponseEntity
+                        .status(HttpStatus.OK)
+                        .body(response);
         }
 }
