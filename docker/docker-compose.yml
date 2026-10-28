@@ -7,9 +7,17 @@ services:
       POSTGRES_PASSWORD: "117"
       POSTGRES_DB: sia_db
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - sia-postgres-volume:/var/lib/postgresql/data
+
+  mongo:
+    image: mongo:8.0
+    container_name: sia-mongo
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - sia-mongo-volume:/data/db
 
   redis:
     image: redis:7.4
@@ -25,3 +33,5 @@ volumes:
     name: sia-postgres-volume
   sia-redis-volume:
     name: sia-redis-volume
+  sia-mongo-volume:
+    name: sia-mongo-volume

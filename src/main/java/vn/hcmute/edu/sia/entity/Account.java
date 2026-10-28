@@ -1,4 +1,6 @@
 package vn.hcmute.edu.sia.entity;
+import lombok.Getter;
+import lombok.Setter;
 import vn.hcmute.edu.sia.enums.*;
 import java.time.Instant;
 import java.util.UUID;
@@ -18,9 +20,11 @@ import jakarta.persistence.InheritanceType;
 import jakarta.persistence.Table;
 
 @Entity
+@Getter
+@Setter
 @Table(name = "users")
 @Inheritance (strategy = InheritanceType.JOINED)
-public abstract class Account {
+public class Account {
     @Id 
     @GeneratedValue ()
     @Column(name = "user_id", nullable = false, updatable = false)
@@ -74,6 +78,22 @@ public abstract class Account {
         this.accessStatus = accessStatus;
         this.passwordChangeRequired = passwordChangeRequired;
     }
+
+    public static Account createAdmin(
+            String fullName,
+            String email,
+            String passwordHash
+    ) {
+        return new Account(
+                fullName,
+                email,
+                passwordHash,
+                AccountRole.ADMIN,
+                AccountAccessStatus.ACTIVE,
+                false
+        );
+    }
+
     private String normalizeFullName(String fullName) {
         if (fullName == null || fullName.isBlank()) {
             throw new IllegalArgumentException("Full name must not be blank");

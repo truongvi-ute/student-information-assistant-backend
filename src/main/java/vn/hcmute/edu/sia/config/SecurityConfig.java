@@ -40,7 +40,9 @@ public class SecurityConfig {
                         "/api/auth/login",
                         "/api/auth/forgot-password",
                         "/api/auth/forgot-password/verify",
-                        "/api/auth/reset-password"
+                        "/api/auth/reset-password",
+                                "/chat-websocket",
+                                "/chat-websocket/**"
                         ).permitAll()
 
                         .anyRequest().authenticated()
