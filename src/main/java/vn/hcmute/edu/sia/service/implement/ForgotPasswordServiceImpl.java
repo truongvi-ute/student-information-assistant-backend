@@ -25,14 +25,14 @@ import vn.hcmute.edu.sia.service.EmailService;
 import vn.hcmute.edu.sia.service.ForgotPasswordService;
 import vn.hcmute.edu.sia.service.OtpService;
 import vn.hcmute.edu.sia.validation.PasswordPolicy;
+import vn.hcmute.edu.sia.util.EmailNormalizer;
 
 @Service
 public class ForgotPasswordServiceImpl implements ForgotPasswordService {
 
-    private static final String FORGOT_PASSWORD_MESSAGE =
-            "Da gui ma OTP ve email neu ton tai.";
     private static final Duration RESET_TOKEN_TTL = Duration.ofMinutes(10);
     private static final int RESET_TOKEN_BYTES = 32;
+    private static final Duration RESEND_COOLDOWN = Duration.ofMinutes(1);
 
     private final AccountRepository accountRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
@@ -58,39 +58,45 @@ public class ForgotPasswordServiceImpl implements ForgotPasswordService {
 
     @Override
     public ForgotPasswordResponse startForgotPassword(ForgotPasswordRequest request) {
-        String email = normalizeEmail(request.email());
+        String email = EmailNormalizer.normalize(request.email());
 
         Account account = accountRepository
                 .findByEmail(email)
                 .orElse(null);
 
         if (account == null || account.getAccessStatus() == AccountAccessStatus.BLOCKED) {
-            return new ForgotPasswordResponse(
-                    FORGOT_PASSWORD_MESSAGE,
-                    0
-            );
+            return new ForgotPasswordResponse("If an account exists for this email, you will receive a password reset OTP.", RESEND_COOLDOWN.toSeconds());
         }
 
         String otp = otpService.issueOtp(email, OtpPurpose.FORGOT_PASSWORD);
         emailService.sendOtp(email, otp);
 
-        Duration resendCooldown =
-                otpService.getResendCooldownRemaining(
-                        email,
-                        OtpPurpose.FORGOT_PASSWORD
-                );
-
-        return new ForgotPasswordResponse(
-                FORGOT_PASSWORD_MESSAGE,
-                resendCooldown.toSeconds()
-        );
+        return new ForgotPasswordResponse("If an account exists for this email, you will receive a password reset OTP.", RESEND_COOLDOWN.toSeconds());
     }
 
+    @Override
+    public ForgotPasswordResponse resendForgotPasswordOtp(String email) {
+        String normalizedEmail = EmailNormalizer.normalize(email);
+
+        Account account = accountRepository
+                .findByEmail(normalizedEmail)
+                .orElse(null);
+
+        if (account == null || account.getAccessStatus() == AccountAccessStatus.BLOCKED) {
+            return new ForgotPasswordResponse("If an account exists for this email, a new password reset OTP will be sent.", RESEND_COOLDOWN.toSeconds());
+        }
+
+        String otp = otpService.issueOtp(normalizedEmail, OtpPurpose.FORGOT_PASSWORD);
+        emailService.sendOtp(normalizedEmail, otp);
+
+        return new ForgotPasswordResponse("If an account exists for this email, a new password reset OTP will be sent.", RESEND_COOLDOWN.toSeconds());
+    }
+    
     @Override
     public ForgotPasswordOtpVerificationResponse verifyForgotPasswordOtp(
             VerifyForgotPasswordOtpRequest request
     ) {
-        String email = normalizeEmail(request.email());
+        String email = EmailNormalizer.normalize(request.email());
 
         Account account = accountRepository
                 .findByEmail(email)
@@ -183,16 +189,6 @@ public class ForgotPasswordServiceImpl implements ForgotPasswordService {
         return new MessageResponse(
                 "Password has been reset. Please login again."
         );
-    }
-
-    private String normalizeEmail(String email) {
-        if (email == null || email.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Email must not be blank"
-            );
-        }
-
-        return email.trim().toLowerCase();
     }
 
     private String generateResetToken() {

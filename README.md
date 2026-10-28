@@ -241,3 +241,31 @@ Response thanh cong:
 ```
 
 Loi thuong gap: reset token sai/het han, password khong dung policy, confirm password khong khop, hoac password moi trung password hien tai. Password moi can tu 6 den 72 ky tu va co it nhat 1 chu cai, 1 chu so.
+
+## Change Password API
+
+Endpoint nay yeu cau dang nhap bang access token. Tai khoan co `mustChangePassword: true` (duoc tra ve trong response dang nhap) cung dung endpoint nay va cung cap mat khau hien tai.
+
+```http
+POST /api/auth/change-password
+Authorization: Bearer <access-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "currentPassword": "temporary123",
+  "newPassword": "newpass123",
+  "confirmPassword": "newpass123"
+}
+```
+
+Response thanh cong:
+
+```json
+{
+  "message": "Password changed successfully."
+}
+```
+
+Thanh cong se cap nhat password va dat `mustChangePassword` ve `false`. Mat khau moi phai tu 6 den 72 ky tu, co it nhat 1 chu cai va 1 chu so, khop voi mat khau xac nhan va khac mat khau hien tai.

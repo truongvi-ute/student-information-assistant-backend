@@ -9,10 +9,7 @@ import vn.hcmute.edu.sia.dto.response.MessageResponse;
 
 public interface ForgotPasswordService {
     ForgotPasswordResponse startForgotPassword(ForgotPasswordRequest request);
-
-    ForgotPasswordOtpVerificationResponse verifyForgotPasswordOtp(
-            VerifyForgotPasswordOtpRequest request
-    );
-
+    ForgotPasswordResponse resendForgotPasswordOtp(String email);
+    ForgotPasswordOtpVerificationResponse verifyForgotPasswordOtp(VerifyForgotPasswordOtpRequest request);
     MessageResponse resetPassword(ResetPasswordRequest request);
 }

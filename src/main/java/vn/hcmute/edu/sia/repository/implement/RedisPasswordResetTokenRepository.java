@@ -7,6 +7,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;
 
 import vn.hcmute.edu.sia.repository.PasswordResetTokenRepository;
+import vn.hcmute.edu.sia.util.EmailNormalizer;
 
 @Repository
 public class RedisPasswordResetTokenRepository implements PasswordResetTokenRepository {
@@ -21,7 +22,7 @@ public class RedisPasswordResetTokenRepository implements PasswordResetTokenRepo
     public void save(String resetToken, String email, Duration ttl) {
         redisTemplate.opsForValue().set(
                 resetTokenKey(resetToken),
-                normalizeEmail(email),
+                EmailNormalizer.normalize(email),
                 ttl
         );
     }
@@ -40,9 +41,5 @@ public class RedisPasswordResetTokenRepository implements PasswordResetTokenRepo
 
     private String resetTokenKey(String resetToken) {
         return "password-reset:token:" + resetToken;
-    }
-
-    private String normalizeEmail(String email) {
-        return email.trim().toLowerCase();
     }
 }

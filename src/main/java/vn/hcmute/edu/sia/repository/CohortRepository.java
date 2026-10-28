@@ -6,6 +6,4 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import vn.hcmute.edu.sia.entity.Cohort;
 
-public interface CohortRepository
-        extends JpaRepository<Cohort, UUID> {
-}
+public interface CohortRepository extends JpaRepository<Cohort, UUID> {}

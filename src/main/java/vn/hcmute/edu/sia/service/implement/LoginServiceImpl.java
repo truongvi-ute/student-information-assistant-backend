@@ -5,6 +5,7 @@ import java.time.Duration;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import vn.hcmute.edu.sia.util.EmailNormalizer;
 import vn.hcmute.edu.sia.dto.request.LoginRequest;
 import vn.hcmute.edu.sia.entity.Account;
 import vn.hcmute.edu.sia.enums.AccountAccessStatus;
@@ -41,7 +42,7 @@ public class LoginServiceImpl implements LoginService {
 
     @Override
     public LoginResponse login(LoginRequest request) {
-        String email = normalizeEmail(request.email());
+        String email = EmailNormalizer.normalize(request.email());
 
         checkLoginLock(email);
 
@@ -106,9 +107,5 @@ public class LoginServiceImpl implements LoginService {
             "Login is temporarily locked.",
             lockRemaining.toSeconds()
         );
-    }
-
-    private String normalizeEmail(String email) {
-        return email.trim().toLowerCase();
     }
 }

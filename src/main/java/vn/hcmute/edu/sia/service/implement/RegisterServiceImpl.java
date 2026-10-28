@@ -1,13 +1,13 @@
 package vn.hcmute.edu.sia.service.implement;
 import org.springframework.security.crypto.password.PasswordEncoder;
-
+import vn.hcmute.edu.sia.util.EmailNormalizer;
 import java.time.Duration;
 import org.springframework.stereotype.Service;
 
 import vn.hcmute.edu.sia.dto.OtpVerificationResult;
 import vn.hcmute.edu.sia.dto.PendingRegistration;
 import vn.hcmute.edu.sia.dto.request.RegisterRequest;
-import vn.hcmute.edu.sia.dto.response.OtpResendCooldownResponse;
+import vn.hcmute.edu.sia.dto.response.RegistrationOtpResponse;
 import vn.hcmute.edu.sia.enums.OtpPurpose;
 import vn.hcmute.edu.sia.enums.OtpVerificationStatus;
 import vn.hcmute.edu.sia.exception.OtpVerificationLockedException;
@@ -26,8 +26,7 @@ import vn.hcmute.edu.sia.entity.StudentAccount;
 @Service
 public class RegisterServiceImpl implements RegisterService {
 
-    private static final Duration PENDING_REGISTRATION_TTL =
-            Duration.ofMinutes(10);
+    private static final Duration PENDING_REGISTRATION_TTL = Duration.ofMinutes(10);
 
     private final AccountRepository accountRepository;
     private final PendingRegistrationRepository pendingRegistrationRepository;
@@ -58,37 +57,52 @@ public class RegisterServiceImpl implements RegisterService {
     }
 
     @Override
-    public OtpResendCooldownResponse startRegistration(RegisterRequest request) {
-        String email = normalizeEmail(request.email());
+    public RegistrationOtpResponse startRegistration(RegisterRequest request) {
+        String email = EmailNormalizer.normalize(request.email());
 
         if (accountRepository.existsByEmail(email)) {
             throw new IllegalStateException("Email already exists.");
         }
+
         String passwordHash = passwordEncoder.encode(request.password());
+
         PendingRegistration pendingRegistration = new PendingRegistration(
-                                                                        request.fullName(),
-                                                                        email,
-                                                                        passwordHash,
-                                                                        request.majorId(),
-                                                                        request.educationSystemId(),
-                                                                        request.cohortId(),
-                                                                        request.academicContext()
-                                                                );
-        String otp = otpService.issueOtp(email, OtpPurpose.REGISTER);
-        pendingRegistrationRepository.save(
+                request.fullName(),
                 email,
-                pendingRegistration,
-                PENDING_REGISTRATION_TTL
+                passwordHash,
+                request.majorId(),
+                request.educationSystemId(),
+                request.cohortId(),
+                request.academicContext()
         );
+
+        String otp = otpService.issueOtp(email, OtpPurpose.REGISTER);
+        pendingRegistrationRepository.save(email, pendingRegistration, PENDING_REGISTRATION_TTL);
         emailService.sendOtp(email, otp);
         Duration resendCooldown = otpService.getResendCooldownRemaining(email, OtpPurpose.REGISTER);
 
-        return new OtpResendCooldownResponse("OTP has been sent.",resendCooldown.toSeconds());
+        return new RegistrationOtpResponse("A registration OTP has been sent.",resendCooldown.toSeconds());
     }
 
     @Override
-    public void verifyRegistration(String email, String otp) {
-        String normalizedEmail = normalizeEmail(email);
+    public RegistrationOtpResponse resendRegistrationOtp(String email) {
+        String normalizedEmail = EmailNormalizer.normalize(email);
+
+        if (pendingRegistrationRepository.findByEmail(normalizedEmail).isEmpty()) {
+                throw new IllegalStateException("Pending registration not found or expired.");
+        }
+
+        String otp = otpService.issueOtp(normalizedEmail, OtpPurpose.REGISTER);
+        emailService.sendOtp(normalizedEmail, otp);
+
+        Duration resendCooldown = otpService.getResendCooldownRemaining(normalizedEmail, OtpPurpose.REGISTER);
+
+        return new RegistrationOtpResponse("A new registration OTP has been sent.", resendCooldown.toSeconds());
+    } 
+
+    @Override
+    public void verifyRegistrationOtp(String email, String otp) {
+        String normalizedEmail = EmailNormalizer.normalize(email);
 
         PendingRegistration pendingRegistration =
                 pendingRegistrationRepository
@@ -169,13 +183,4 @@ public class RegisterServiceImpl implements RegisterService {
 
         pendingRegistrationRepository.deleteByEmail(normalizedEmail);
     }
-    //helper
-    private String normalizeEmail(String email) {
-        if (email == null || email.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Email must not be blank"
-            );
-        }
-        return email.trim().toLowerCase();
-    }   
 }

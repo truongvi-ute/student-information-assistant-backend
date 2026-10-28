@@ -1,7 +1,10 @@
 package vn.hcmute.edu.sia.entity;
 import lombok.Getter;
-import lombok.Setter;
 import vn.hcmute.edu.sia.enums.*;
+import vn.hcmute.edu.sia.enums.AccountAccessStatus;
+import vn.hcmute.edu.sia.enums.AccountRole;
+import vn.hcmute.edu.sia.util.EmailNormalizer;
+
 import java.time.Instant;
 import java.util.UUID;
 
@@ -21,10 +24,9 @@ import jakarta.persistence.Table;
 
 @Entity
 @Getter
-@Setter
 @Table(name = "users")
 @Inheritance (strategy = InheritanceType.JOINED)
-public class Account {
+public abstract class Account {
     @Id 
     @GeneratedValue ()
     @Column(name = "user_id", nullable = false, updatable = false)
@@ -72,42 +74,18 @@ public class Account {
             boolean passwordChangeRequired
     ) {
         this.fullName = normalizeFullName(fullName);
-        this.email = normalizeEmail(email);
+        this.email = EmailNormalizer.normalize(email);
         this.passwordHash = passwordHash;
         this.role = role;
         this.accessStatus = accessStatus;
         this.passwordChangeRequired = passwordChangeRequired;
     }
-
-    public static Account createAdmin(
-            String fullName,
-            String email,
-            String passwordHash
-    ) {
-        return new Account(
-                fullName,
-                email,
-                passwordHash,
-                AccountRole.ADMIN,
-                AccountAccessStatus.ACTIVE,
-                false
-        );
-    }
-
     private String normalizeFullName(String fullName) {
         if (fullName == null || fullName.isBlank()) {
             throw new IllegalArgumentException("Full name must not be blank");
         }
 
         return fullName.trim();
-    }
-
-    private String normalizeEmail(String email) {
-        if (email == null || email.isBlank()) {
-            throw new IllegalArgumentException("Email must not be blank");
-        }
-
-        return email.trim().toLowerCase();
     }
 
     public AccountAccessStatus getAccessStatus() {
