@@ -1,4 +1,6 @@
 package vn.hcmute.edu.sia.entity;
+import lombok.Getter;
+import vn.hcmute.edu.sia.enums.*;
 import vn.hcmute.edu.sia.enums.AccountAccessStatus;
 import vn.hcmute.edu.sia.enums.AccountRole;
 import vn.hcmute.edu.sia.util.EmailNormalizer;
@@ -8,6 +10,7 @@ import java.util.UUID;
 
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.jspecify.annotations.Nullable;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -20,6 +23,7 @@ import jakarta.persistence.InheritanceType;
 import jakarta.persistence.Table;
 
 @Entity
+@Getter
 @Table(name = "users")
 @Inheritance (strategy = InheritanceType.JOINED)
 public abstract class Account {
