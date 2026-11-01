@@ -7,10 +7,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import vn.hcmute.edu.sia.dto.request.ChangePasswordRequest;
-import vn.hcmute.edu.sia.dto.response.MessageResponse;
+import vn.hcmute.edu.sia.dto.response.PasswordChangedResponse;
 import vn.hcmute.edu.sia.entity.Account;
 import vn.hcmute.edu.sia.repository.AccountRepository;
 import vn.hcmute.edu.sia.service.ChangePasswordService;
+import vn.hcmute.edu.sia.service.RefreshTokenService;
 import vn.hcmute.edu.sia.validation.PasswordPolicy;
 
 @Service
@@ -18,18 +19,21 @@ public class ChangePasswordServiceImpl implements ChangePasswordService {
 
     private final AccountRepository accountRepository;
     private final PasswordEncoder passwordEncoder;
+    private final RefreshTokenService refreshTokenService;
 
     public ChangePasswordServiceImpl(
             AccountRepository accountRepository,
-            PasswordEncoder passwordEncoder
+            PasswordEncoder passwordEncoder,
+            RefreshTokenService refreshTokenService
     ) {
         this.accountRepository = accountRepository;
         this.passwordEncoder = passwordEncoder;
+        this.refreshTokenService = refreshTokenService;
     }
 
     @Override
     @Transactional
-    public MessageResponse changePassword(UUID accountId, ChangePasswordRequest request) {
+    public PasswordChangedResponse changePassword(UUID accountId, ChangePasswordRequest request) {
         Account account = accountRepository
                 .findById(accountId)
                 .orElseThrow(() -> new IllegalArgumentException("Account not found."));
@@ -52,7 +56,8 @@ public class ChangePasswordServiceImpl implements ChangePasswordService {
 
         account.resetPassword(passwordEncoder.encode(request.newPassword()));
         accountRepository.save(account);
+        refreshTokenService.revokeAll(accountId);
 
-        return new MessageResponse("Password changed successfully.");
+        return new PasswordChangedResponse("Password changed successfully.");
     }
 }

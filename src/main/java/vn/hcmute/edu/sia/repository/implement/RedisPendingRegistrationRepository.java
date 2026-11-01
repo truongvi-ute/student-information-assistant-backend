@@ -7,7 +7,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
-import vn.hcmute.edu.sia.dto.PendingRegistration;
+import vn.hcmute.edu.sia.dto.internal.PendingRegistration;
 import vn.hcmute.edu.sia.repository.PendingRegistrationRepository;
 import vn.hcmute.edu.sia.util.EmailNormalizer;
 

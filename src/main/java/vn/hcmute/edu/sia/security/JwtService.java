@@ -24,12 +24,8 @@ public class JwtService {
 
     public JwtService(
         @Value("${jwt.secret}") String secret,
-        @Value("${jwt.access-token-expiration}") long accessTokenExpiration
-    ) {
-        this.signingKey = Keys.hmacShaKeyFor(
-            secret.getBytes(StandardCharsets.UTF_8)
-        );
-
+        @Value("${jwt.access-token-expiration}") long accessTokenExpiration) {
+        this.signingKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.accessTokenExpiration = accessTokenExpiration;
     }
 
@@ -48,19 +44,14 @@ public class JwtService {
 
     public UUID extractUserId(String token) {
         Claims claims = extractClaims(token);
-
-        return UUID.fromString(
-            claims.getSubject()
-        );
+        
+        return UUID.fromString(claims.getSubject());
     }
 
     public AccountRole extractRole(String token) {
         Claims claims = extractClaims(token);
 
-        String role = claims.get(
-            "role",
-            String.class
-        );
+        String role = claims.get("role", String.class);
 
         return AccountRole.valueOf(role);
     }

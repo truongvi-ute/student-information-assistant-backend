@@ -1,7 +1,7 @@
 package vn.hcmute.edu.sia.repository;
 import java.time.Duration;
 import java.util.Optional;
-import vn.hcmute.edu.sia.dto.PendingRegistration;
+import vn.hcmute.edu.sia.dto.internal.PendingRegistration;
 
 public interface PendingRegistrationRepository {
     void save(String email, PendingRegistration pendingRegistration, Duration ttl);

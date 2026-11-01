@@ -2,7 +2,7 @@ package vn.hcmute.edu.sia.service;
 
 import java.time.Duration;
 
-import vn.hcmute.edu.sia.dto.OtpVerificationResult;
+import vn.hcmute.edu.sia.dto.internal.OtpVerificationResult;
 import vn.hcmute.edu.sia.enums.OtpPurpose;
 
 public interface OtpService {

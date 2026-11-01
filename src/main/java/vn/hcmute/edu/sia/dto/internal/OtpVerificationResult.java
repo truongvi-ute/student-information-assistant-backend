@@ -1,4 +1,4 @@
-package vn.hcmute.edu.sia.dto;
+package vn.hcmute.edu.sia.dto.internal;
 
 import vn.hcmute.edu.sia.enums.OtpVerificationStatus;
 
