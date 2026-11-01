@@ -13,7 +13,7 @@ import vn.hcmute.edu.sia.dto.request.ResetPasswordRequest;
 import vn.hcmute.edu.sia.dto.request.VerifyForgotPasswordOtpRequest;
 import vn.hcmute.edu.sia.dto.response.ForgotPasswordOtpVerificationResponse;
 import vn.hcmute.edu.sia.dto.response.ForgotPasswordResponse;
-import vn.hcmute.edu.sia.dto.response.MessageResponse;
+import vn.hcmute.edu.sia.dto.response.PasswordResetResponse;
 import vn.hcmute.edu.sia.entity.Account;
 import vn.hcmute.edu.sia.enums.AccountAccessStatus;
 import vn.hcmute.edu.sia.enums.OtpPurpose;
@@ -147,7 +147,7 @@ public class ForgotPasswordServiceImpl implements ForgotPasswordService {
     }
 
     @Override
-    public MessageResponse resetPassword(ResetPasswordRequest request) {
+    public PasswordResetResponse resetPassword(ResetPasswordRequest request) {
         String newPassword = request.newPassword();
         PasswordPolicy.validate(newPassword);
 
@@ -186,7 +186,7 @@ public class ForgotPasswordServiceImpl implements ForgotPasswordService {
         passwordResetTokenRepository.delete(request.resetToken());
         otpService.invalidateOtp(email, OtpPurpose.FORGOT_PASSWORD);
 
-        return new MessageResponse(
+        return new PasswordResetResponse(
                 "Password has been reset. Please login again."
         );
     }

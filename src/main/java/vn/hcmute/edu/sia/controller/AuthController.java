@@ -17,7 +17,8 @@ import vn.hcmute.edu.sia.dto.request.VerifyRegisterOtpRequest;
 import vn.hcmute.edu.sia.dto.request.ResendRegistrationOtpRequest;
 import vn.hcmute.edu.sia.dto.response.ForgotPasswordOtpVerificationResponse;
 import vn.hcmute.edu.sia.dto.response.ForgotPasswordResponse;
-import vn.hcmute.edu.sia.dto.response.MessageResponse;
+import vn.hcmute.edu.sia.dto.response.PasswordChangedResponse;
+import vn.hcmute.edu.sia.dto.response.PasswordResetResponse;
 import vn.hcmute.edu.sia.dto.response.RegistrationOtpResponse;
 import vn.hcmute.edu.sia.service.ForgotPasswordService;
 import vn.hcmute.edu.sia.service.ChangePasswordService;
@@ -117,10 +118,10 @@ public class AuthController {
         }
 
         @PostMapping("/reset-password")
-        public ResponseEntity<MessageResponse> resetPassword(
+        public ResponseEntity<PasswordResetResponse> resetPassword(
                 @Valid @RequestBody ResetPasswordRequest request
         ) {
-                MessageResponse response =
+                PasswordResetResponse response =
                         forgotPasswordService.resetPassword(request);
 
                 return ResponseEntity
@@ -129,11 +130,11 @@ public class AuthController {
         }
 
         @PostMapping("/change-password")
-        public ResponseEntity<MessageResponse> changePassword(
+        public ResponseEntity<PasswordChangedResponse> changePassword(
                 @AuthenticationPrincipal AccountPrincipal principal,
                 @Valid @RequestBody ChangePasswordRequest request
         ) {
-                MessageResponse response = changePasswordService.changePassword(
+                PasswordChangedResponse response = changePasswordService.changePassword(
                         principal.getAccountId(),
                         request
                 );
