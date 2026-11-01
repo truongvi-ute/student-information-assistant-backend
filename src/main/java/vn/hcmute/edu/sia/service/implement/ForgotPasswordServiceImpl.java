@@ -7,7 +7,7 @@ import java.util.Base64;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import vn.hcmute.edu.sia.dto.OtpVerificationResult;
+import vn.hcmute.edu.sia.dto.internal.OtpVerificationResult;
 import vn.hcmute.edu.sia.dto.request.ForgotPasswordRequest;
 import vn.hcmute.edu.sia.dto.request.ResetPasswordRequest;
 import vn.hcmute.edu.sia.dto.request.VerifyForgotPasswordOtpRequest;
@@ -24,6 +24,7 @@ import vn.hcmute.edu.sia.repository.PasswordResetTokenRepository;
 import vn.hcmute.edu.sia.service.EmailService;
 import vn.hcmute.edu.sia.service.ForgotPasswordService;
 import vn.hcmute.edu.sia.service.OtpService;
+import vn.hcmute.edu.sia.service.RefreshTokenService;
 import vn.hcmute.edu.sia.validation.PasswordPolicy;
 import vn.hcmute.edu.sia.util.EmailNormalizer;
 
@@ -40,19 +41,22 @@ public class ForgotPasswordServiceImpl implements ForgotPasswordService {
     private final EmailService emailService;
     private final PasswordEncoder passwordEncoder;
     private final SecureRandom secureRandom;
+    private final RefreshTokenService refreshTokenService;
 
     public ForgotPasswordServiceImpl(
             AccountRepository accountRepository,
             PasswordResetTokenRepository passwordResetTokenRepository,
             OtpService otpService,
             EmailService emailService,
-            PasswordEncoder passwordEncoder
+            PasswordEncoder passwordEncoder,
+            RefreshTokenService refreshTokenService
     ) {
         this.accountRepository = accountRepository;
         this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.otpService = otpService;
         this.emailService = emailService;
         this.passwordEncoder = passwordEncoder;
+        this.refreshTokenService = refreshTokenService;
         this.secureRandom = new SecureRandom();
     }
 
@@ -183,6 +187,7 @@ public class ForgotPasswordServiceImpl implements ForgotPasswordService {
         account.resetPassword(passwordHash);
 
         accountRepository.save(account);
+        refreshTokenService.revokeAll(account.getId());
         passwordResetTokenRepository.delete(request.resetToken());
         otpService.invalidateOtp(email, OtpPurpose.FORGOT_PASSWORD);
 

@@ -6,7 +6,7 @@ import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 
-import vn.hcmute.edu.sia.dto.OtpVerificationResult;
+import vn.hcmute.edu.sia.dto.internal.OtpVerificationResult;
 import vn.hcmute.edu.sia.enums.OtpPurpose;
 import vn.hcmute.edu.sia.enums.OtpVerificationStatus;
 import vn.hcmute.edu.sia.repository.OtpRepository;

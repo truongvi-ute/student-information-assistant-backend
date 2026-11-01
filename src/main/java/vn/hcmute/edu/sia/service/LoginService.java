@@ -1,8 +1,8 @@
 package vn.hcmute.edu.sia.service;
 
 import vn.hcmute.edu.sia.dto.request.LoginRequest;
-import vn.hcmute.edu.sia.dto.response.LoginResponse;
+import vn.hcmute.edu.sia.dto.internal.LoginResult;
 
 public interface LoginService {
-    LoginResponse login(LoginRequest request);
+    LoginResult login(LoginRequest request);
 }

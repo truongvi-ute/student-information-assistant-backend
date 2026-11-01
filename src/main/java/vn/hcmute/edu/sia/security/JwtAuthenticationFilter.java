@@ -26,10 +26,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtService jwtService;
     private final AccountRepository accountRepository;
 
-    public JwtAuthenticationFilter(
-        JwtService jwtService,
-        AccountRepository accountRepository
-    ) {
+    public JwtAuthenticationFilter(JwtService jwtService, AccountRepository accountRepository) {
         this.jwtService = jwtService;
         this.accountRepository = accountRepository;
     }
@@ -41,13 +38,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         FilterChain filterChain
     ) throws ServletException, IOException {
 
-        String authorizationHeader =
-            request.getHeader("Authorization");
+        String authorizationHeader = request.getHeader("Authorization");
 
-        if (
-            authorizationHeader == null ||
-            !authorizationHeader.startsWith(BEARER_PREFIX)
-        ) {
+        if (authorizationHeader == null || !authorizationHeader.startsWith(BEARER_PREFIX)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -65,15 +58,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    private void authenticate(
-        String token,
-        HttpServletRequest request
-    ) {
-        if (
-            SecurityContextHolder
-                .getContext()
-                .getAuthentication() != null
-        ) {
+    private void authenticate(String token, HttpServletRequest request) {
+        if (SecurityContextHolder.getContext().getAuthentication() != null) {
             return;
         }
 
@@ -87,15 +73,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
 
-        if (
-            account.getAccessStatus()
-                == AccountAccessStatus.BLOCKED
-        ) {
+        if (account.getAccessStatus() == AccountAccessStatus.BLOCKED) {
             return;
         }
 
-        AccountPrincipal principal =
-            new AccountPrincipal(account);
+        AccountPrincipal principal = new AccountPrincipal(account);
 
         UsernamePasswordAuthenticationToken authentication =
             new UsernamePasswordAuthenticationToken(

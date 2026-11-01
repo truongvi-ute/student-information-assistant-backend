@@ -4,8 +4,8 @@ import vn.hcmute.edu.sia.util.EmailNormalizer;
 import java.time.Duration;
 import org.springframework.stereotype.Service;
 
-import vn.hcmute.edu.sia.dto.OtpVerificationResult;
-import vn.hcmute.edu.sia.dto.PendingRegistration;
+import vn.hcmute.edu.sia.dto.internal.OtpVerificationResult;
+import vn.hcmute.edu.sia.dto.internal.PendingRegistration;
 import vn.hcmute.edu.sia.dto.request.RegisterRequest;
 import vn.hcmute.edu.sia.dto.response.RegistrationOtpResponse;
 import vn.hcmute.edu.sia.enums.OtpPurpose;

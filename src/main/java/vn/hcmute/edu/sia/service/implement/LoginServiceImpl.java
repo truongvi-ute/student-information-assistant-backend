@@ -12,9 +12,12 @@ import vn.hcmute.edu.sia.enums.AccountAccessStatus;
 import vn.hcmute.edu.sia.exception.LoginLockedException;
 import vn.hcmute.edu.sia.repository.AccountRepository;
 import vn.hcmute.edu.sia.repository.LoginAttemptRepository;
-import vn.hcmute.edu.sia.service.LoginService;
 import vn.hcmute.edu.sia.dto.response.LoginResponse;
-import vn.hcmute.edu.sia.security.JwtService;
+import vn.hcmute.edu.sia.dto.internal.IssuedTokens;
+import vn.hcmute.edu.sia.dto.internal.LoginResult;
+import vn.hcmute.edu.sia.service.LoginService;
+import vn.hcmute.edu.sia.service.RefreshTokenService;
+
 @Service
 public class LoginServiceImpl implements LoginService {
 
@@ -26,22 +29,22 @@ public class LoginServiceImpl implements LoginService {
     private final AccountRepository accountRepository;
     private final LoginAttemptRepository loginAttemptRepository;
     private final PasswordEncoder passwordEncoder;
-    private final JwtService jwtService;
+    private final RefreshTokenService refreshTokenService;
 
     public LoginServiceImpl(
         AccountRepository accountRepository,
         LoginAttemptRepository loginAttemptRepository,
         PasswordEncoder passwordEncoder,
-        JwtService jwtService
+        RefreshTokenService refreshTokenService
     ) {
         this.accountRepository = accountRepository;
         this.loginAttemptRepository = loginAttemptRepository;
         this.passwordEncoder = passwordEncoder;
-        this.jwtService = jwtService;
+        this.refreshTokenService = refreshTokenService;
     }
 
     @Override
-    public LoginResponse login(LoginRequest request) {
+    public LoginResult login(LoginRequest request) {
         String email = EmailNormalizer.normalize(request.email());
 
         checkLoginLock(email);
@@ -68,12 +71,15 @@ public class LoginServiceImpl implements LoginService {
         }
         loginAttemptRepository.clearFailedAttempts(email);
 
-        String accessToken = jwtService.generateAccessToken(account);
+        IssuedTokens tokens = refreshTokenService.issue(account);
 
-        return new LoginResponse(
-            accessToken,
-            account.getRole(),
-            account.isPasswordChangeRequired()
+        return new LoginResult(
+            new LoginResponse(
+                tokens.accessToken(),
+                account.getRole(),
+                account.isPasswordChangeRequired()
+            ),
+            tokens
         );
     }
 

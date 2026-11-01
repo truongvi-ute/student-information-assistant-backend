@@ -11,6 +11,7 @@ import vn.hcmute.edu.sia.dto.response.PasswordChangedResponse;
 import vn.hcmute.edu.sia.entity.Account;
 import vn.hcmute.edu.sia.repository.AccountRepository;
 import vn.hcmute.edu.sia.service.ChangePasswordService;
+import vn.hcmute.edu.sia.service.RefreshTokenService;
 import vn.hcmute.edu.sia.validation.PasswordPolicy;
 
 @Service
@@ -18,13 +19,16 @@ public class ChangePasswordServiceImpl implements ChangePasswordService {
 
     private final AccountRepository accountRepository;
     private final PasswordEncoder passwordEncoder;
+    private final RefreshTokenService refreshTokenService;
 
     public ChangePasswordServiceImpl(
             AccountRepository accountRepository,
-            PasswordEncoder passwordEncoder
+            PasswordEncoder passwordEncoder,
+            RefreshTokenService refreshTokenService
     ) {
         this.accountRepository = accountRepository;
         this.passwordEncoder = passwordEncoder;
+        this.refreshTokenService = refreshTokenService;
     }
 
     @Override
@@ -52,6 +56,7 @@ public class ChangePasswordServiceImpl implements ChangePasswordService {
 
         account.resetPassword(passwordEncoder.encode(request.newPassword()));
         accountRepository.save(account);
+        refreshTokenService.revokeAll(accountId);
 
         return new PasswordChangedResponse("Password changed successfully.");
     }
