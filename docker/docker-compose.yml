@@ -29,12 +29,15 @@ services:
     command: redis-server --appendonly yes
 
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z
+    image: rustfs/rustfs:latest
     container_name: sia-minio
-    command: server /data --console-address ":9001"
+    command: /data
     environment:
-      MINIO_ROOT_USER: sia-minio
-      MINIO_ROOT_PASSWORD: "12345678"
+      RUSTFS_ACCESS_KEY: sia-minio
+      RUSTFS_SECRET_KEY: "12345678"
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_CONSOLE_ENABLE: "true"
     ports:
       - "9000:9000"
       - "9001:9001"
