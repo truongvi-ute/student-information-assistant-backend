@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: "117"
       POSTGRES_DB: sia_db
     ports:
-      - "5433:5432"
+      - "5432:5432"
     volumes:
       - sia-postgres-volume:/var/lib/postgresql/data
 
@@ -15,7 +15,7 @@ services:
     image: mongo:8.0
     container_name: sia-mongo
     ports:
-      - "127.0.0.1:27017:27017"
+      - "27017:27017"
     volumes:
       - sia-mongo-volume:/data/db
 
@@ -28,6 +28,28 @@ services:
       - sia-redis-volume:/data
     command: redis-server --appendonly yes
 
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z
+    container_name: sia-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: sia-minio
+      MINIO_ROOT_PASSWORD: "12345678"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - sia-minio-volume:/data
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.1
+    container_name: sia-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - sia-qdrant-volume:/qdrant/storage
+
 volumes:
   sia-postgres-volume:
     name: sia-postgres-volume
@@ -35,3 +57,7 @@ volumes:
     name: sia-redis-volume
   sia-mongo-volume:
     name: sia-mongo-volume
+  sia-minio-volume:
+    name: sia-minio-volume
+  sia-qdrant-volume:
+    name: sia-qdrant-volume
