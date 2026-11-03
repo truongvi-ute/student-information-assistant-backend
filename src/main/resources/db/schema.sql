@@ -128,7 +128,7 @@ CREATE TABLE documents (
 	storage_path TEXT NOT NULL,
 	mime_type VARCHAR(100) NOT NULL,
 	size_bytes BIGINT NOT NULL,
-	checksum_sha256 CHAR(64) NOT NULL,
+	checksum_sha256 VARCHAR(64) NOT NULL,
 	rag_status VARCHAR(20) NOT NULL DEFAULT 'NOT_INDEXED',
 	lifecycle_status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
 	archived_at TIMESTAMPTZ,
