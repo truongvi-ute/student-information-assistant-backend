@@ -9,18 +9,12 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrimaryKeyJoinColumn;
 import jakarta.persistence.Table;
-import lombok.AllArgsConstructor;
 import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
 import vn.hcmute.edu.sia.enums.AccountAccessStatus;
 import vn.hcmute.edu.sia.enums.AccountRole;
 
 @Entity
 @Getter
-@Setter
-@NoArgsConstructor
-@AllArgsConstructor
 @Table(name = "advisor_profiles")
 @PrimaryKeyJoinColumn(name = "advisor_id")
 public class AdvisorAccount extends Account {
@@ -34,6 +28,10 @@ public class AdvisorAccount extends Account {
 
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
+
+    protected AdvisorAccount() {
+        super();
+    }
 
     public AdvisorAccount(
             String fullName,
