@@ -5,6 +5,7 @@ import java.time.OffsetDateTime;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import vn.hcmute.edu.sia.dto.response.LoginLockResponse;
@@ -27,6 +28,26 @@ public class GlobalExceptionHandler {
                 return buildErrorResponse(
                         HttpStatus.CONFLICT,
                         exception.getMessage()
+                );
+        }
+
+        @ExceptionHandler(MaxUploadSizeExceededException.class)
+        public ResponseEntity<ApiErrorResponse> handleMaxUploadSizeExceeded(
+                MaxUploadSizeExceededException exception
+        ) {
+                return buildErrorResponse(
+                        HttpStatus.PAYLOAD_TOO_LARGE,
+                        "Document size must not exceed 20 MiB."
+                );
+        }
+
+        @ExceptionHandler(DocumentStorageException.class)
+        public ResponseEntity<ApiErrorResponse> handleDocumentStorage(
+                DocumentStorageException exception
+        ) {
+                return buildErrorResponse(
+                        HttpStatus.SERVICE_UNAVAILABLE,
+                        "Document storage is unavailable."
                 );
         }
 

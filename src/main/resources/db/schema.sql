@@ -100,14 +100,12 @@ CREATE TABLE student_profiles (
 
 
 CREATE TABLE advisor_profiles (
-	advisor_profile_id UUID,
-	advisor_id UUID NOT NULL,
+	advisor_id UUID,
 	department_id UUID NOT NULL,
 	phone_number VARCHAR(20),
 	note TEXT,
 
-	CONSTRAINT pk_advisor_profiles PRIMARY KEY (advisor_profile_id),
-	CONSTRAINT uq_advisor_profiles_advisor_id UNIQUE (advisor_id),
+	CONSTRAINT pk_advisor_profiles PRIMARY KEY (advisor_id),
 
 	CONSTRAINT fk_advisor_profiles_advisor_id
 		FOREIGN KEY (advisor_id)
@@ -130,7 +128,7 @@ CREATE TABLE documents (
 	storage_path TEXT NOT NULL,
 	mime_type VARCHAR(100) NOT NULL,
 	size_bytes BIGINT NOT NULL,
-	checksum_sha256 CHAR(64) NOT NULL,
+	checksum_sha256 VARCHAR(64) NOT NULL,
 	rag_status VARCHAR(20) NOT NULL DEFAULT 'NOT_INDEXED',
 	lifecycle_status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
 	archived_at TIMESTAMPTZ,
@@ -163,8 +161,8 @@ CREATE TABLE documents (
 );
 
 
-CREATE TABLE document_change_requests (
-	document_change_request_id UUID,
+CREATE TABLE document_rag_requests (
+	document_rag_request_id UUID,
 	document_id UUID NOT NULL,
 	requested_by_advisor_id UUID NOT NULL,
 	reviewed_by_admin_id UUID,
@@ -177,27 +175,27 @@ CREATE TABLE document_change_requests (
 	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 	reviewed_at TIMESTAMPTZ,
 
-	CONSTRAINT pk_document_change_requests PRIMARY KEY (document_change_request_id),
+	CONSTRAINT pk_document_rag_requests PRIMARY KEY (document_rag_request_id),
 
-	CONSTRAINT fk_document_change_requests_document_id
+	CONSTRAINT fk_document_rag_requests_document_id
 		FOREIGN KEY (document_id)
 		REFERENCES documents(document_id)
 		ON DELETE RESTRICT,
 
-	CONSTRAINT fk_document_change_requests_requested_by_advisor_id
+	CONSTRAINT fk_document_rag_requests_requested_by_advisor_id
 		FOREIGN KEY (requested_by_advisor_id)
 		REFERENCES users(user_id)
 		ON DELETE RESTRICT,
 
-	CONSTRAINT fk_document_change_requests_reviewed_by_admin_id
+	CONSTRAINT fk_document_rag_requests_reviewed_by_admin_id
 		FOREIGN KEY (reviewed_by_admin_id)
 		REFERENCES users(user_id)
 		ON DELETE RESTRICT,
 
-	CONSTRAINT chk_document_change_requests_request_type
+	CONSTRAINT chk_document_rag_requests_request_type
 		CHECK (request_type IN ('ADD', 'UPDATE', 'DELETE')),
 
-	CONSTRAINT chk_document_change_requests_status
+	CONSTRAINT chk_document_rag_requests_status
 		CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED'))
 );
 
