@@ -1,5 +1,4 @@
 package vn.hcmute.edu.sia.repository;
-import vn.hcmute.edu.sia.dto.response.AccountProfileResponse;
 import vn.hcmute.edu.sia.entity.Account;
 
 import java.util.List;
