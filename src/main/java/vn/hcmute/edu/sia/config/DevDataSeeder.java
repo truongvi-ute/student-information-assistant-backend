@@ -10,65 +10,147 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.support.TransactionTemplate;
 
-import vn.hcmute.edu.sia.entity.AdvisorAccount;
+import vn.hcmute.edu.sia.entity.Account;
+import vn.hcmute.edu.sia.entity.AdvisorProfile;
 import vn.hcmute.edu.sia.entity.Department;
+import vn.hcmute.edu.sia.entity.StudentProfile;
+import vn.hcmute.edu.sia.enums.AccountAccessStatus;
+import vn.hcmute.edu.sia.enums.AccountRole;
 import vn.hcmute.edu.sia.enums.CatalogStatus;
 import vn.hcmute.edu.sia.repository.AccountRepository;
+import vn.hcmute.edu.sia.repository.AdvisorProfileRepository;
 import vn.hcmute.edu.sia.repository.DepartmentRepository;
+import vn.hcmute.edu.sia.repository.StudentProfileRepository;
 
 @Configuration
 @Profile("dev")
 public class DevDataSeeder {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DevDataSeeder.class);
+    private static final String TEST_STUDENT_EMAIL = "student.test@example.com";
     private static final String TEST_ADVISOR_EMAIL = "advisor.test@example.com";
+    private static final String TEST_ADMIN_EMAIL = "admin.test@example.com";
     private static final String TEST_DEPARTMENT_NAME = "Test Department";
 
     @Bean
-    CommandLineRunner seedTestAdvisor(
+    CommandLineRunner seedTestAccounts(
             AccountRepository accountRepository,
+            StudentProfileRepository studentProfileRepository,
+            AdvisorProfileRepository advisorProfileRepository,
             DepartmentRepository departmentRepository,
             PasswordEncoder passwordEncoder,
-            @Value("${SEED_ADVISOR_PASSWORD}") String advisorPassword
+            TransactionTemplate transactionTemplate,
+            @Value("${SEED_TEST_PASSWORD:${SEED_ADVISOR_PASSWORD:}}") String testPassword
     ) {
         return args -> {
-            if (accountRepository.existsByEmail(TEST_ADVISOR_EMAIL)) {
-                LOGGER.info("Test advisor already exists: {}", TEST_ADVISOR_EMAIL);
-                return;
-            }
-            if (advisorPassword == null || advisorPassword.isBlank()) {
+            boolean accountMissing = List.of(
+                    TEST_STUDENT_EMAIL,
+                    TEST_ADVISOR_EMAIL,
+                    TEST_ADMIN_EMAIL
+            ).stream().anyMatch(email -> accountRepository.findByEmail(email).isEmpty());
+
+            if (accountMissing && (testPassword == null || testPassword.isBlank())) {
                 throw new IllegalStateException(
-                        "Set SEED_ADVISOR_PASSWORD before starting with the dev profile"
+                        "Set SEED_TEST_PASSWORD before starting with the dev profile"
                 );
             }
 
-            List<Department> departments = departmentRepository.findAll();
-            Department department = departments.stream()
-                    .filter(item -> item.getStatus() == CatalogStatus.ACTIVE)
-                    .findFirst()
-                    .orElseGet(() -> departments.stream()
-                            .filter(item -> TEST_DEPARTMENT_NAME.equals(item.getName()))
-                            .findFirst()
-                            .orElseGet(() -> departmentRepository.save(
-                                    new Department(TEST_DEPARTMENT_NAME)
-                            )));
+            transactionTemplate.executeWithoutResult(transactionStatus -> {
+                Department department = findOrCreateTestDepartment(departmentRepository);
 
-            AdvisorAccount advisor = new AdvisorAccount(
-                    "Test Advisor",
-                    TEST_ADVISOR_EMAIL,
-                    passwordEncoder.encode(advisorPassword),
-                    department,
-                    "0900000000",
-                    "Local account for document upload testing"
-            );
+                Account student = findOrCreateAccount(
+                        accountRepository,
+                        passwordEncoder,
+                        TEST_STUDENT_EMAIL,
+                        "Test Student",
+                        AccountRole.STUDENT,
+                        testPassword
+                );
+                if (!studentProfileRepository.existsByAccount_Id(student.getId())) {
+                    studentProfileRepository.save(new StudentProfile(
+                            student,
+                            null,
+                            null,
+                            null,
+                            "Local account for student profile testing"
+                    ));
+                }
 
-            accountRepository.save(advisor);
+                Account advisor = findOrCreateAccount(
+                        accountRepository,
+                        passwordEncoder,
+                        TEST_ADVISOR_EMAIL,
+                        "Test Advisor",
+                        AccountRole.ADVISOR,
+                        testPassword
+                );
+                if (!advisorProfileRepository.existsByAccount_Id(advisor.getId())) {
+                    advisorProfileRepository.save(new AdvisorProfile(
+                            advisor,
+                            department,
+                            "0900000000",
+                            "Local account for document upload testing"
+                    ));
+                }
+
+                findOrCreateAccount(
+                        accountRepository,
+                        passwordEncoder,
+                        TEST_ADMIN_EMAIL,
+                        "Test Admin",
+                        AccountRole.ADMIN,
+                        testPassword
+                );
+            });
+
             LOGGER.info(
-                    "Created test advisor {} for department {}",
+                    "Ensured dev test accounts for student {}, advisor {}, and admin {}",
+                    TEST_STUDENT_EMAIL,
                     TEST_ADVISOR_EMAIL,
-                    department.getName()
+                    TEST_ADMIN_EMAIL
             );
         };
+    }
+
+    private Account findOrCreateAccount(
+            AccountRepository accountRepository,
+            PasswordEncoder passwordEncoder,
+            String email,
+            String fullName,
+            AccountRole role,
+            String testPassword
+    ) {
+        return accountRepository.findByEmail(email)
+                .map(account -> {
+                    if (account.getRole() != role) {
+                        throw new IllegalStateException(
+                                "Seed account has an unexpected role: " + email
+                        );
+                    }
+                    return account;
+                })
+                .orElseGet(() -> accountRepository.save(new Account(
+                        fullName,
+                        email,
+                        passwordEncoder.encode(testPassword),
+                        role,
+                        AccountAccessStatus.ACTIVE,
+                        false
+                )));
+    }
+
+    private Department findOrCreateTestDepartment(DepartmentRepository departmentRepository) {
+        List<Department> departments = departmentRepository.findAll();
+        return departments.stream()
+                .filter(item -> item.getStatus() == CatalogStatus.ACTIVE)
+                .findFirst()
+                .orElseGet(() -> departments.stream()
+                        .filter(item -> TEST_DEPARTMENT_NAME.equals(item.getName()))
+                        .findFirst()
+                        .orElseGet(() -> departmentRepository.save(
+                                new Department(TEST_DEPARTMENT_NAME)
+                        )));
     }
 }
