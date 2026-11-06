@@ -1,6 +1,7 @@
 package vn.hcmute.edu.sia.entity;
+import lombok.AccessLevel;
 import lombok.Getter;
-import vn.hcmute.edu.sia.enums.*;
+import lombok.NoArgsConstructor;
 import vn.hcmute.edu.sia.enums.AccountAccessStatus;
 import vn.hcmute.edu.sia.enums.AccountRole;
 import vn.hcmute.edu.sia.util.EmailNormalizer;
@@ -10,23 +11,19 @@ import java.util.UUID;
 
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
-import org.jspecify.annotations.Nullable;
-
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
-import jakarta.persistence.Inheritance;
-import jakarta.persistence.InheritanceType;
 import jakarta.persistence.Table;
 
 @Entity
 @Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Table(name = "users")
-@Inheritance (strategy = InheritanceType.JOINED)
-public abstract class Account {
+public class Account {
     @Id 
     @GeneratedValue ()
     @Column(name = "user_id", nullable = false, updatable = false)
@@ -60,12 +57,7 @@ public abstract class Account {
     @Column(name = "updated_at", nullable = false)
     private Instant updateAt;
 
-    //Constructor
-    protected Account() {
-        // Constructor required by JPA.
-    }
-
-    protected Account(
+    public Account(
             String fullName,
             String email,
             String passwordHash,
@@ -98,9 +90,7 @@ public abstract class Account {
 
     public void resetPassword(String newPasswordHash) {
         if (newPasswordHash == null || newPasswordHash.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Password hash must not be blank"
-            );
+            throw new IllegalArgumentException("Password hash must not be blank");
         }
 
         this.passwordHash = newPasswordHash;
