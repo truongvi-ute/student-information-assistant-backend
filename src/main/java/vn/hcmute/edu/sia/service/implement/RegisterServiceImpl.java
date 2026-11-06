@@ -1,5 +1,6 @@
 package vn.hcmute.edu.sia.service.implement;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.annotation.Transactional;
 import vn.hcmute.edu.sia.util.EmailNormalizer;
 import java.time.Duration;
 import org.springframework.stereotype.Service;
@@ -10,19 +11,23 @@ import vn.hcmute.edu.sia.dto.request.RegisterRequest;
 import vn.hcmute.edu.sia.dto.response.RegistrationOtpResponse;
 import vn.hcmute.edu.sia.enums.OtpPurpose;
 import vn.hcmute.edu.sia.enums.OtpVerificationStatus;
+import vn.hcmute.edu.sia.enums.AccountAccessStatus;
+import vn.hcmute.edu.sia.enums.AccountRole;
 import vn.hcmute.edu.sia.exception.OtpVerificationLockedException;
 import vn.hcmute.edu.sia.repository.AccountRepository;
 import vn.hcmute.edu.sia.repository.PendingRegistrationRepository;
 import vn.hcmute.edu.sia.repository.MajorRepository;
 import vn.hcmute.edu.sia.repository.CohortRepository;
 import vn.hcmute.edu.sia.repository.EducationSystemRepository;
+import vn.hcmute.edu.sia.repository.StudentProfileRepository;
 import vn.hcmute.edu.sia.service.EmailService;
 import vn.hcmute.edu.sia.service.OtpService;
 import vn.hcmute.edu.sia.service.RegisterService;
 import vn.hcmute.edu.sia.entity.EducationSystem;
 import vn.hcmute.edu.sia.entity.Major;
 import vn.hcmute.edu.sia.entity.Cohort;
-import vn.hcmute.edu.sia.entity.StudentAccount;
+import vn.hcmute.edu.sia.entity.Account;
+import vn.hcmute.edu.sia.entity.StudentProfile;
 @Service
 public class RegisterServiceImpl implements RegisterService {
 
@@ -33,6 +38,7 @@ public class RegisterServiceImpl implements RegisterService {
     private final MajorRepository majorRepository;
     private final EducationSystemRepository educationSystemRepository;
     private final CohortRepository cohortRepository;
+    private final StudentProfileRepository studentProfileRepository;
     private final OtpService otpService;
     private final EmailService emailService;
     private final PasswordEncoder passwordEncoder;
@@ -43,6 +49,7 @@ public class RegisterServiceImpl implements RegisterService {
         MajorRepository majorRepository,
         EducationSystemRepository educationSystemRepository,
         CohortRepository cohortRepository,
+        StudentProfileRepository studentProfileRepository,
         OtpService otpService,
         EmailService emailService,
         PasswordEncoder passwordEncoder) {
@@ -51,6 +58,7 @@ public class RegisterServiceImpl implements RegisterService {
             this.majorRepository = majorRepository;
             this.educationSystemRepository = educationSystemRepository;
             this.cohortRepository = cohortRepository;
+            this.studentProfileRepository = studentProfileRepository;
             this.otpService = otpService;
             this.emailService = emailService;
             this.passwordEncoder = passwordEncoder;
@@ -101,6 +109,7 @@ public class RegisterServiceImpl implements RegisterService {
     } 
 
     @Override
+    @Transactional
     public void verifyRegistrationOtp(String email, String otp) {
         String normalizedEmail = EmailNormalizer.normalize(email);
 
@@ -168,18 +177,26 @@ public class RegisterServiceImpl implements RegisterService {
                                 )
                         );
 
-        StudentAccount studentAccount =
-                new StudentAccount(
+        Account studentAccount = accountRepository.save(
+                new Account(
                         pendingRegistration.fullName(),
                         pendingRegistration.email(),
                         pendingRegistration.passwordHash(),
+                        AccountRole.STUDENT,
+                        AccountAccessStatus.ACTIVE,
+                        false
+                )
+        );
+
+        studentProfileRepository.save(
+                new StudentProfile(
+                        studentAccount,
                         major,
                         educationSystem,
                         cohort,
                         pendingRegistration.academicContext()
-                );
-
-        accountRepository.save(studentAccount);
+                )
+        );
 
         pendingRegistrationRepository.deleteByEmail(normalizedEmail);
     }

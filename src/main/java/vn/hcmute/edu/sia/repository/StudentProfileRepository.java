@@ -6,4 +6,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import vn.hcmute.edu.sia.entity.StudentProfile;
 
 public interface StudentProfileRepository extends JpaRepository<StudentProfile, UUID> {
+    boolean existsByAccount_Id(UUID accountId);
 }

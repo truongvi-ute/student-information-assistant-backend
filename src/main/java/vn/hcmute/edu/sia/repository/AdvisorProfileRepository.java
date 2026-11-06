@@ -13,6 +13,8 @@ import vn.hcmute.edu.sia.enums.AccountRole;
 
 public interface AdvisorProfileRepository extends JpaRepository<AdvisorProfile, UUID> {
 
+    boolean existsByAccount_Id(UUID accountId);
+
     @Query("""
             SELECT profile
             FROM AdvisorProfile profile
