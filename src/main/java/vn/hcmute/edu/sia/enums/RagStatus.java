@@ -7,3 +7,4 @@ public enum RagStatus {
     FAILED,
     DISABLED
 }
+

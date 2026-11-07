@@ -14,14 +14,14 @@ import org.springframework.web.server.ResponseStatusException;
 import vn.hcmute.edu.sia.dto.request.SendChatMessageRequest;
 import vn.hcmute.edu.sia.dto.response.*;
 import vn.hcmute.edu.sia.entity.Account;
-import vn.hcmute.edu.sia.entity.AdvisorAccount;
+import vn.hcmute.edu.sia.entity.AdvisorProfile;
 import vn.hcmute.edu.sia.entity.ChatConversation;
 import vn.hcmute.edu.sia.entity.ChatMessage;
 import vn.hcmute.edu.sia.enums.AccountAccessStatus;
 import vn.hcmute.edu.sia.enums.AccountRole;
 import vn.hcmute.edu.sia.enums.CatalogStatus;
 import vn.hcmute.edu.sia.repository.AccountRepository;
-import vn.hcmute.edu.sia.repository.AdvisorAccountRepository;
+import vn.hcmute.edu.sia.repository.AdvisorProfileRepository;
 import vn.hcmute.edu.sia.repository.ChatConversationRepository;
 import vn.hcmute.edu.sia.repository.ChatMessageRepository;
 import vn.hcmute.edu.sia.repository.DepartmentRepository;
@@ -36,7 +36,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ChatServiceImpl implements ChatService {
     private final AccountRepository accountRepository;
-    private final AdvisorAccountRepository advisorAccountRepository;
+    private final AdvisorProfileRepository advisorProfileRepository;
     private final DepartmentRepository departmentRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final ChatConversationRepository conversationRepository;
@@ -140,14 +140,18 @@ public class ChatServiceImpl implements ChatService {
         };
 
         if (contactRole == AccountRole.ADVISOR) {
-            return advisorAccountRepository.findAllWithDepartmentByAccessStatus(AccountAccessStatus.ACTIVE)
+            return advisorProfileRepository
+                    .findAllWithAccountAndDepartmentByAccountAccessStatus(
+                            AccountRole.ADVISOR,
+                            AccountAccessStatus.ACTIVE
+                    )
                     .stream()
-                    .map(adv -> new ChatContactResponse(
-                            adv.getId(),
-                            adv.getFullName(),
-                            adv.getRole(),
-                            adv.getDepartment() != null ? adv.getDepartment().getId() : null,
-                            adv.getDepartment() != null ? adv.getDepartment().getName() : null
+                    .map(profile -> new ChatContactResponse(
+                            profile.getAccount().getId(),
+                            profile.getAccount().getFullName(),
+                            profile.getAccount().getRole(),
+                            profile.getDepartment().getId(),
+                            profile.getDepartment().getName()
                     ))
                     .toList();
         }
@@ -213,10 +217,17 @@ public class ChatServiceImpl implements ChatService {
         Map<UUID, Account> accountMap = accountRepository.findAllById(partnerIds).stream()
                 .collect(Collectors.toMap(Account::getId, Function.identity()));
 
-        Map<UUID, AdvisorAccount> advisorMap = Collections.emptyMap();
+        Map<UUID, AdvisorProfile> advisorMap = Collections.emptyMap();
         if (currentUser.getRole() == AccountRole.STUDENT) {
-            advisorMap = advisorAccountRepository.findAllWithDepartmentByIdIn(partnerIds).stream()
-                    .collect(Collectors.toMap(AdvisorAccount::getId, Function.identity()));
+            advisorMap = advisorProfileRepository
+                    .findAllWithAccountAndDepartmentByAccountIdIn(
+                            partnerIds,
+                            AccountRole.ADVISOR
+                    ).stream()
+                    .collect(Collectors.toMap(
+                            profile -> profile.getAccount().getId(),
+                            Function.identity()
+                    ));
         }
 
         List<ChatConversationResponse> result = new ArrayList<>();
@@ -237,7 +248,7 @@ public class ChatServiceImpl implements ChatService {
 
             String departmentName = null;
             if (advisorMap.containsKey(partnerId)) {
-                AdvisorAccount advisor = advisorMap.get(partnerId);
+                AdvisorProfile advisor = advisorMap.get(partnerId);
                 if (advisor.getDepartment() != null) {
                     departmentName = advisor.getDepartment().getName();
                 }
