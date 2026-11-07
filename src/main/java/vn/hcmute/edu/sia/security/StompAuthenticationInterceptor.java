@@ -72,6 +72,12 @@ public class StompAuthenticationInterceptor implements ChannelInterceptor {
             throw new AccessDeniedException("Account is blocked.");
         }
 
+        if (account.getRole() == AccountRole.ADVISOR && account.isPasswordChangeRequired()) {
+            throw new AccessDeniedException(
+                    "Password change is required before connecting to chat."
+            );
+        }
+
         // Chat này chỉ dành cho advisor và student.
         if (account.getRole() != AccountRole.ADVISOR
                 && account.getRole() != AccountRole.STUDENT) {

@@ -97,6 +97,10 @@ public class Account {
         this.passwordChangeRequired = false;
     }
 
+    public void requirePasswordChange() {
+        this.passwordChangeRequired = true;
+    }
+
     public AccountRole getRole() {
         return role;
     }
