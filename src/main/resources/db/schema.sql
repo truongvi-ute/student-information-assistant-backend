@@ -123,17 +123,6 @@ CREATE TABLE advisor_profiles (
 );
 
 
-CREATE TABLE admin_profiles (
-	admin_id UUID,
-
-	CONSTRAINT pk_admin_profiles PRIMARY KEY (admin_id),
-
-	CONSTRAINT fk_admin_profiles_admin_id
-		FOREIGN KEY (admin_id)
-		REFERENCES users(user_id)
-		ON DELETE CASCADE
-);
-
 
 CREATE TABLE documents (
 	document_id UUID,
