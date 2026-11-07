@@ -129,6 +129,18 @@ public class DevDataSeeder {
                                 "Seed account has an unexpected role: " + email
                         );
                     }
+
+                    boolean passwordChangeRequired =
+                            role == AccountRole.ADMIN || role == AccountRole.ADVISOR;
+                    if (passwordChangeRequired
+                            && testPassword != null
+                            && !testPassword.isBlank()
+                            && !account.isPasswordChangeRequired()
+                            && passwordEncoder.matches(testPassword, account.getPasswordHash())) {
+                        account.requirePasswordChange();
+                        return accountRepository.save(account);
+                    }
+
                     return account;
                 })
                 .orElseGet(() -> accountRepository.save(new Account(
@@ -137,7 +149,7 @@ public class DevDataSeeder {
                         passwordEncoder.encode(testPassword),
                         role,
                         AccountAccessStatus.ACTIVE,
-                        false
+                        role == AccountRole.ADMIN || role == AccountRole.ADVISOR
                 )));
     }
 

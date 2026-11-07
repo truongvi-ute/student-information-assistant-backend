@@ -17,6 +17,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import vn.hcmute.edu.sia.entity.Account;
 import vn.hcmute.edu.sia.enums.AccountAccessStatus;
+import vn.hcmute.edu.sia.enums.AccountRole;
 import vn.hcmute.edu.sia.repository.AccountRepository;
 import vn.hcmute.edu.sia.repository.RefreshTokenRepository;
 import vn.hcmute.edu.sia.repository.RefreshTokenRepository.RefreshTokenRecord;
@@ -94,6 +95,15 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
         if (account == null || account.getAccessStatus() == AccountAccessStatus.BLOCKED) {
             refreshTokenRepository.revokeFamily(currentToken.familyId());
             throw unauthorized();
+        }
+
+        if (account.isPasswordChangeRequired()
+                && (account.getRole() == AccountRole.ADMIN || account.getRole() == AccountRole.ADVISOR)) {
+            refreshTokenRepository.revokeFamily(currentToken.familyId());
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Password change is required before refreshing the session."
+            );
         }
 
         long nowMillis = System.currentTimeMillis();
