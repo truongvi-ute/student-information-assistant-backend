@@ -21,6 +21,7 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import vn.hcmute.edu.sia.enums.AccountRole;
 import vn.hcmute.edu.sia.enums.DocumentLifecycleStatus;
+import vn.hcmute.edu.sia.enums.RagStatus;
 
 @Entity
 @Getter
@@ -61,6 +62,10 @@ public class Document {
 
     @Column(name = "checksum_sha256", nullable = false, length = 64)
     private String checksumSha256;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "rag_status", nullable = false, length = 20)
+    private RagStatus ragStatus = RagStatus.NOT_INDEXED;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "lifecycle_status", nullable = false, length = 20)
@@ -111,6 +116,58 @@ public class Document {
         this.mimeType = requireText(mimeType, "MIME type", 100);
         this.sizeBytes = sizeBytes;
         this.checksumSha256 = checksumSha256.toLowerCase(Locale.ROOT);
+        this.ragStatus = RagStatus.NOT_INDEXED;
+        this.lifecycleStatus = DocumentLifecycleStatus.DRAFT;
+    }
+
+    public void updateDraftMetadata(String title, String description, Boolean allowDownload) {
+        if (this.lifecycleStatus != DocumentLifecycleStatus.DRAFT) {
+            throw new IllegalStateException("Only draft documents can be updated directly");
+        }
+        this.title = requireText(title, "Title", 255);
+        this.description = normalizeOptionalText(description);
+        if (allowDownload != null) {
+            this.allowDownload = allowDownload;
+        }
+    }
+
+    public void applyApprovedUpdate(String title, String description, Boolean allowDownload) {
+        if (title != null && !title.isBlank()) {
+            this.title = requireText(title, "Title", 255);
+        }
+        if (description != null) {
+            this.description = normalizeOptionalText(description);
+        }
+        if (allowDownload != null) {
+            this.allowDownload = allowDownload;
+        }
+    }
+
+    public void startRagProcessing() {
+        this.ragStatus = RagStatus.PROCESSING;
+    }
+
+    public void completeRagIndexing() {
+        this.ragStatus = RagStatus.READY;
+        this.lifecycleStatus = DocumentLifecycleStatus.ACTIVE;
+    }
+
+    public void failRagIndexing() {
+        this.ragStatus = RagStatus.FAILED;
+    }
+
+    public void archive() {
+        this.lifecycleStatus = DocumentLifecycleStatus.ARCHIVED;
+        this.ragStatus = RagStatus.DISABLED;
+        this.archivedAt = Instant.now();
+    }
+
+    public boolean isEligibleForRag() {
+        return this.lifecycleStatus == DocumentLifecycleStatus.ACTIVE && this.ragStatus == RagStatus.READY;
+    }
+
+    public boolean isDownloadable() {
+        return this.allowDownload && this.lifecycleStatus != DocumentLifecycleStatus.ARCHIVED;
     }
 
     private String requireText(String value, String fieldName, int maxLength) {

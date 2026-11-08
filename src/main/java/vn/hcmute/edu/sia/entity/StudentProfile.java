@@ -75,7 +75,6 @@ public class StudentProfile {
         if (academicContext == null || academicContext.isBlank()) {
             return null;
         }
-
         return academicContext.trim();
     }
 }
