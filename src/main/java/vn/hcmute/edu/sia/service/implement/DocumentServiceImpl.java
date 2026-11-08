@@ -46,11 +46,11 @@ public class DocumentServiceImpl implements DocumentService {
                         "Account was not found"
                 ));
 
-        if ((uploader.getRole() != AccountRole.ADVISOR && uploader.getRole() != AccountRole.ADMIN)
+        if (uploader.getRole() != AccountRole.ADVISOR
                 || uploader.getAccessStatus() != AccountAccessStatus.ACTIVE) {
             throw new ResponseStatusException(
                     HttpStatus.FORBIDDEN,
-                    "An active advisor or admin account is required to upload documents"
+                    "An active advisor account is required to upload documents"
             );
         }
 

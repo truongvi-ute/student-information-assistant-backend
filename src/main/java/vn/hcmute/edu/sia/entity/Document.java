@@ -97,8 +97,8 @@ public class Document {
             long sizeBytes,
             String checksumSha256
     ) {
-        if (uploadedBy == null || (uploadedBy.getRole() != AccountRole.ADVISOR && uploadedBy.getRole() != AccountRole.ADMIN)) {
-            throw new IllegalArgumentException("Only an advisor or admin can upload a document");
+        if (uploadedBy == null || uploadedBy.getRole() != AccountRole.ADVISOR) {
+            throw new IllegalArgumentException("Only an advisor can upload a document");
         }
         if (sizeBytes <= 0 || sizeBytes > MAX_SIZE_BYTES) {
             throw new IllegalArgumentException("Document size must be between 1 byte and 20 MiB");

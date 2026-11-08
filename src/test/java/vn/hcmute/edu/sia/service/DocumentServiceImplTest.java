@@ -87,6 +87,20 @@ class DocumentServiceImplTest {
     }
 
     @Test
+    @DisplayName("Upload thất bại khi uploader là Admin")
+    void uploadDocument_Admin_ThrowsForbidden() {
+        Account admin = new Account("Admin", "admin@test.edu.vn", "hash", AccountRole.ADMIN, AccountAccessStatus.ACTIVE, false);
+        UUID adminId = UUID.randomUUID();
+        when(accountRepository.findById(adminId)).thenReturn(Optional.of(admin));
+
+        UploadDocumentRequest request = new UploadDocumentRequest(file, "Quy chế", null, true);
+
+        assertThatThrownBy(() -> documentService.uploadDocument(adminId, request))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+    }
+
+    @Test
     @DisplayName("Upload thất bại khi tài khoản bị khóa")
     void uploadDocument_BlockedAccount_ThrowsForbidden() {
         Account blockedAdvisor = new Account("Blocked", "b@test.edu.vn", "hash", AccountRole.ADVISOR, AccountAccessStatus.BLOCKED, false);

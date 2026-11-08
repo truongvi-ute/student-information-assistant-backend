@@ -29,7 +29,7 @@ public class DocumentController {
     private final DocumentService documentService;
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasAnyRole('ADVISOR', 'ADMIN')")
+    @PreAuthorize("hasRole('ADVISOR')")
     public ResponseEntity<DocumentUploadResponse> uploadDocument(
             @AuthenticationPrincipal AccountPrincipal principal,
             @Valid @ModelAttribute UploadDocumentRequest request

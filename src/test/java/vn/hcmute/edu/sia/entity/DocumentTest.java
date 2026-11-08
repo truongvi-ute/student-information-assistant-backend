@@ -36,12 +36,11 @@ class DocumentTest {
     }
 
     @Test
-    @DisplayName("Tạo Document thành công với tài khoản Admin")
-    void createDocument_Admin_Success() {
-        Document doc = new Document(admin, "Quy chế chung", null, false, "qc.docx", "path/qc.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 2048L, "b".repeat(64));
-
-        assertThat(doc.getTitle()).isEqualTo("Quy chế chung");
-        assertThat(doc.isAllowDownload()).isFalse();
+    @DisplayName("Tạo Document thất bại khi uploader là Admin")
+    void createDocument_Admin_ThrowsException() {
+        assertThatThrownBy(() -> new Document(admin, "Quy chế chung", null, false, "qc.docx", "path/qc.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 2048L, "b".repeat(64)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Only an advisor can upload a document");
     }
 
     @Test
@@ -49,7 +48,7 @@ class DocumentTest {
     void createDocument_Student_ThrowsException() {
         assertThatThrownBy(() -> new Document(student, "Tiêu đề", null, true, "f.pdf", "p", "application/pdf", 1024L, "a".repeat(64)))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Only an advisor or admin can upload a document");
+                .hasMessageContaining("Only an advisor can upload a document");
     }
 
     @Test
@@ -69,7 +68,7 @@ class DocumentTest {
     @Test
     @DisplayName("Lưu trữ tài liệu chuyển trạng thái sang ARCHIVED và vô hiệu hóa RAG")
     void archiveDocument_Success() {
-        Document doc = new Document(admin, "Quy chế cũ", null, true, "f.pdf", "p", "application/pdf", 1024L, "a".repeat(64));
+        Document doc = new Document(advisor, "Quy chế cũ", null, true, "f.pdf", "p", "application/pdf", 1024L, "a".repeat(64));
         doc.completeRagIndexing();
 
         doc.archive();
