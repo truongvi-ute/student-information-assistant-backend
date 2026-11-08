@@ -2,6 +2,7 @@ package vn.hcmute.edu.sia.config;
 
 import java.util.List;
 
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,19 +16,23 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import vn.hcmute.edu.sia.security.JwtAuthenticationFilter;
+import vn.hcmute.edu.sia.security.PasswordChangeRequiredFilter;
 
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
 
         private final JwtAuthenticationFilter jwtAuthenticationFilter;
+        private final ObjectMapper objectMapper;
         private final String frontendOrigin;
 
         public SecurityConfig(
                 JwtAuthenticationFilter jwtAuthenticationFilter,
+                ObjectMapper objectMapper,
                 @Value("${app.frontend-origin}") String frontendOrigin
         ) {
                 this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+                this.objectMapper = objectMapper;
                 this.frontendOrigin = frontendOrigin;
         }
 
@@ -67,6 +72,10 @@ public class SecurityConfig {
                 .addFilterBefore(
                         jwtAuthenticationFilter,
                         UsernamePasswordAuthenticationFilter.class
+                )
+                .addFilterAfter(
+                        new PasswordChangeRequiredFilter(objectMapper),
+                        JwtAuthenticationFilter.class
                 );
 
                 return http.build();

@@ -16,16 +16,22 @@ public class AccountPrincipal implements UserDetails {
     private final String email;
     private final String passwordHash;
     private final String role;
+    private final boolean passwordChangeRequired;
 
     public AccountPrincipal(Account account) {
         this.accountId = account.getId();
         this.email = account.getEmail();
         this.passwordHash = account.getPasswordHash();
         this.role = account.getRole().name();
+        this.passwordChangeRequired = account.isPasswordChangeRequired();
     }
 
     public UUID getAccountId() {
         return accountId;
+    }
+
+    public boolean isPasswordChangeRequired() {
+        return passwordChangeRequired;
     }
 
     @Override

@@ -96,8 +96,16 @@ public class Account {
         this.passwordChangeRequired = false;
     }
 
-    public void block() {
-        this.accessStatus = AccountAccessStatus.BLOCKED;
+    public void requirePasswordChange() {
+        this.passwordChangeRequired = true;
+    }
+
+    public AccountRole getRole() {
+        return role;
+    }
+    
+    public boolean isPasswordChangeRequired() {
+        return passwordChangeRequired;
     }
 
     public void activate() {
