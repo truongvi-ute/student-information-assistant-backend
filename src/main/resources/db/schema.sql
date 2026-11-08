@@ -122,8 +122,6 @@ CREATE TABLE advisor_profiles (
 		ON DELETE RESTRICT
 );
 
-
-
 CREATE TABLE documents (
 	document_id UUID,
 	uploaded_by_user_id UUID NOT NULL,

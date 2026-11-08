@@ -18,10 +18,6 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import lombok.Getter;
-import vn.hcmute.edu.sia.enums.AccountAccessStatus;
-import vn.hcmute.edu.sia.enums.AccountRole;
-import vn.hcmute.edu.sia.util.EmailNormalizer;
 
 @Entity
 @Getter
@@ -32,18 +28,18 @@ public class Account {
     @GeneratedValue ()
     @Column(name = "user_id", nullable = false, updatable = false)
     private UUID id;
-
-    @Column(name = "full_name", nullable = false, length = 150)
+    
+    @Column (name = "full_name", nullable = false, length = 150)
     private String fullName;
 
-    @Column(name = "email", nullable = false, unique = true, length = 255)
+    @Column (name = "email", nullable = false, unique = true, length = 255)
     private String email;
 
-    @Column(name = "password_hash", nullable = false, length = 255)
+    @Column (name = "password_hash", nullable = false, length = 255)
     private String passwordHash;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "role", nullable = false, length = 20, updatable = false)
+    @Enumerated (EnumType.STRING)
+    @Column (name = "role", nullable = false, length = 20, updatable = false)
     private AccountRole role;
 
     @Enumerated(EnumType.STRING)
@@ -55,11 +51,11 @@ public class Account {
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
-    private Instant createdAt;
+    private Instant createAt;
 
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
-    private Instant updatedAt;
+    private Instant updateAt;
 
     public Account(
             String fullName,
@@ -76,22 +72,27 @@ public class Account {
         this.accessStatus = accessStatus;
         this.passwordChangeRequired = passwordChangeRequired;
     }
-
     private String normalizeFullName(String fullName) {
         if (fullName == null || fullName.isBlank()) {
             throw new IllegalArgumentException("Full name must not be blank");
         }
+
         return fullName.trim();
     }
 
-    public void changePassword(String newPasswordHash) {
-        resetPassword(newPasswordHash);
+    public AccountAccessStatus getAccessStatus() {
+        return accessStatus;
+    }
+
+    public String getPasswordHash(){
+        return passwordHash;
     }
 
     public void resetPassword(String newPasswordHash) {
         if (newPasswordHash == null || newPasswordHash.isBlank()) {
             throw new IllegalArgumentException("Password hash must not be blank");
         }
+
         this.passwordHash = newPasswordHash;
         this.passwordChangeRequired = false;
     }
@@ -108,11 +109,12 @@ public class Account {
         return passwordChangeRequired;
     }
 
-    public void activate() {
-        this.accessStatus = AccountAccessStatus.ACTIVE;
+    public UUID getId(){
+        return id;
     }
 
-    public boolean isActive() {
-        return this.accessStatus == AccountAccessStatus.ACTIVE;
+    public String getEmail()
+    {
+        return email;
     }
 }

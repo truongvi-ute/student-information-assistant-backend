@@ -1,18 +1,15 @@
 package vn.hcmute.edu.sia.service.implement;
 
 import java.io.IOException;
-import java.util.List;
 import java.util.UUID;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import vn.hcmute.edu.sia.dto.internal.StoredDocumentFile;
 import vn.hcmute.edu.sia.dto.request.UploadDocumentRequest;
-import vn.hcmute.edu.sia.dto.response.DocumentResponse;
 import vn.hcmute.edu.sia.dto.response.DocumentUploadResponse;
 import vn.hcmute.edu.sia.entity.Account;
 import vn.hcmute.edu.sia.entity.Document;
@@ -35,19 +32,18 @@ public class DocumentServiceImpl implements DocumentService {
     private final DocumentUploadValidator documentUploadValidator;
 
     @Override
-    @Transactional
     public DocumentUploadResponse uploadDocument(
-            UUID uploaderId,
+            UUID advisorId,
             UploadDocumentRequest request
     ) {
-        Account uploader = accountRepository.findById(uploaderId)
+        Account advisor = accountRepository.findById(advisorId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.UNAUTHORIZED,
-                        "Account was not found"
+                        "Advisor account was not found"
                 ));
 
-        if (uploader.getRole() != AccountRole.ADVISOR
-                || uploader.getAccessStatus() != AccountAccessStatus.ACTIVE) {
+        if (advisor.getRole() != AccountRole.ADVISOR
+                || advisor.getAccessStatus() != AccountAccessStatus.ACTIVE) {
             throw new ResponseStatusException(
                     HttpStatus.FORBIDDEN,
                     "An active advisor account is required to upload documents"
@@ -72,7 +68,7 @@ public class DocumentServiceImpl implements DocumentService {
             boolean allowDownload = request.allowDownload() == null
                     || request.allowDownload();
             Document document = new Document(
-                    uploader,
+                    advisor,
                     request.title(),
                     request.description(),
                     allowDownload,
@@ -89,15 +85,6 @@ public class DocumentServiceImpl implements DocumentService {
             deleteStoredFileAfterFailure(storedFile, exception);
             throw exception;
         }
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public List<DocumentResponse> getDocuments() {
-        return documentRepository.findAllWithUploaderOrderByCreatedAtDesc()
-                .stream()
-                .map(DocumentResponse::from)
-                .toList();
     }
 
     private void deleteStoredFileAfterFailure(
