@@ -8,12 +8,25 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.server.ResponseStatusException;
 import vn.hcmute.edu.sia.dto.response.LoginLockResponse;
 import vn.hcmute.edu.sia.dto.response.ApiErrorResponse;
 import vn.hcmute.edu.sia.dto.response.OtpVerificationLockResponse;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+        @ExceptionHandler(ResponseStatusException.class)
+        public ResponseEntity<ApiErrorResponse> handleResponseStatus(ResponseStatusException exception) {
+                int status = exception.getStatusCode().value();
+                ApiErrorResponse response = new ApiErrorResponse(
+                        status,
+                        HttpStatus.valueOf(status).getReasonPhrase(),
+                        exception.getReason(),
+                        OffsetDateTime.now()
+                );
+                return ResponseEntity.status(exception.getStatusCode()).body(response);
+        }
 
         @ExceptionHandler(IllegalArgumentException.class)
         public ResponseEntity<ApiErrorResponse> handleIllegalArgument(IllegalArgumentException exception) {
