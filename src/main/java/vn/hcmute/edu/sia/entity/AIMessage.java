@@ -11,7 +11,7 @@ import org.springframework.data.mongodb.core.mapping.Field;
 import vn.hcmute.edu.sia.enums.MessageSenderType;
 
 @Document(collection = "messages")
-@TypeAlias("AI")
+@TypeAlias("AI_MESSAGE")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class AIMessage extends ChatMessage {
