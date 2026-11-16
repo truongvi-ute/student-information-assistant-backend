@@ -64,6 +64,16 @@ public class GlobalExceptionHandler {
                 );
         }
 
+        @ExceptionHandler(AiServiceException.class)
+        public ResponseEntity<ApiErrorResponse> handleAiService(
+                AiServiceException exception
+        ) {
+                return buildErrorResponse(
+                        exception.getStatus(),
+                        exception.getMessage()
+                );
+        }
+
         @ExceptionHandler(MethodArgumentNotValidException.class)
         public ResponseEntity<ApiErrorResponse> handleValidation(MethodArgumentNotValidException exception) {
                 String message = exception
