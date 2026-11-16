@@ -1,0 +1,251 @@
+package vn.hcmute.edu.sia.service;
+
+import java.lang.reflect.Field;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.SliceImpl;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
+import vn.hcmute.edu.sia.dto.internal.AiServiceChatRequest;
+import vn.hcmute.edu.sia.dto.internal.AiServiceChatResponse;
+import vn.hcmute.edu.sia.dto.internal.AiServiceSourceCitation;
+import vn.hcmute.edu.sia.dto.request.CreateAiConversationRequest;
+import vn.hcmute.edu.sia.dto.request.SendAiMessageRequest;
+import vn.hcmute.edu.sia.dto.response.AiChatbotHistoryResponse;
+import vn.hcmute.edu.sia.dto.response.AiChatbotTurnResponse;
+import vn.hcmute.edu.sia.dto.response.AiConversationResponse;
+import vn.hcmute.edu.sia.entity.AIConversation;
+import vn.hcmute.edu.sia.entity.AIMessage;
+import vn.hcmute.edu.sia.entity.Account;
+import vn.hcmute.edu.sia.entity.ChatMessage;
+import vn.hcmute.edu.sia.entity.Citation;
+import vn.hcmute.edu.sia.entity.Document;
+import vn.hcmute.edu.sia.entity.UserMessage;
+import vn.hcmute.edu.sia.enums.AccountAccessStatus;
+import vn.hcmute.edu.sia.enums.AccountRole;
+import vn.hcmute.edu.sia.enums.MessageSenderType;
+import vn.hcmute.edu.sia.exception.AiServiceException;
+import vn.hcmute.edu.sia.repository.AccountRepository;
+import vn.hcmute.edu.sia.repository.ChatConversationRepository;
+import vn.hcmute.edu.sia.repository.ChatMessageRepository;
+import vn.hcmute.edu.sia.repository.DocumentRepository;
+import vn.hcmute.edu.sia.service.implement.AiChatbotServiceImpl;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class AiChatbotServiceImplTest {
+
+    @Mock private AccountRepository accountRepository;
+    @Mock private ChatConversationRepository conversationRepository;
+    @Mock private ChatMessageRepository messageRepository;
+    @Mock private DocumentRepository documentRepository;
+    @Mock private AiServiceClient aiServiceClient;
+    @Mock private MongoTemplate mongoTemplate;
+
+    @InjectMocks private AiChatbotServiceImpl aiChatbotService;
+
+    private UUID studentId;
+    private UUID advisorId;
+    private UUID documentId;
+    private Account activeStudent;
+    private Account activeAdvisor;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        studentId = UUID.randomUUID();
+        advisorId = UUID.randomUUID();
+        documentId = UUID.randomUUID();
+
+        activeStudent = new Account(
+                "Nguyễn Văn Sinh Viên",
+                "student@hcmute.edu.vn",
+                "hash",
+                AccountRole.STUDENT,
+                AccountAccessStatus.ACTIVE,
+                false
+        );
+        setField(activeStudent, "id", studentId);
+
+        activeAdvisor = new Account(
+                "TS. Trần Văn Cố Vấn",
+                "advisor@hcmute.edu.vn",
+                "hash",
+                AccountRole.ADVISOR,
+                AccountAccessStatus.ACTIVE,
+                false
+        );
+        setField(activeAdvisor, "id", advisorId);
+    }
+
+    @Test
+    @DisplayName("Tạo AIConversation thành công cho tài khoản STUDENT đang hoạt động")
+    void createConversation_ActiveStudent_Success() {
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(activeStudent));
+        when(conversationRepository.save(any(AIConversation.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        AiConversationResponse response = aiChatbotService.createConversation(
+                studentId,
+                new CreateAiConversationRequest(null, null)
+        );
+
+        assertThat(response.conversationId()).isNotBlank();
+        assertThat(response.title()).isEqualTo(AIConversation.DEFAULT_TITLE);
+    }
+
+    @Test
+    @DisplayName("Chặn tài khoản ADVISOR sử dụng AI Chatbot với mã 403 FORBIDDEN")
+    void createConversation_AdvisorRole_ThrowsForbidden() {
+        when(accountRepository.findById(advisorId)).thenReturn(Optional.of(activeAdvisor));
+
+        assertThatThrownBy(() -> aiChatbotService.createConversation(advisorId, null))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(ex -> ((ResponseStatusException) ex).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("Hỏi đáp AI lưu cặp UserMessage + AIMessage kèm Citation và tự đặt tiêu đề")
+    @SuppressWarnings("unchecked")
+    void askQuestion_Success_SavesUserMessageAndAIMessageWithCitations() throws Exception {
+        AIConversation conversation = new AIConversation(studentId, null, null);
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(activeStudent));
+        when(conversationRepository.findByIdAndStudentIdAndConversationTypeAndDeletedAtIsNull(
+                conversation.getId(), studentId.toString(), "AI"
+        )).thenReturn(Optional.of(conversation));
+
+        Document matchedDoc = new Document(
+                activeAdvisor,
+                "Quy chế học vụ 2026",
+                "Mô tả",
+                true,
+                "quy_che_2026.pdf",
+                "documents/quy_che_2026.pdf",
+                "application/pdf",
+                2048L,
+                "a".repeat(64)
+        );
+        setField(matchedDoc, "id", documentId);
+        when(documentRepository.findByOriginalFilenameIn(anyCollection()))
+                .thenReturn(List.of(matchedDoc));
+
+        AiServiceSourceCitation sourceCitation = new AiServiceSourceCitation(
+                "quy_che_2026.pdf",
+                12,
+                4,
+                0.89,
+                "Sinh viên đạt GPA từ 3.2 trở lên..."
+        );
+        AiServiceChatResponse aiResponse = new AiServiceChatResponse(
+                "Điều kiện nhận học bổng KKHT là gì?",
+                "Theo quy chế học vụ, sinh viên cần GPA từ 3.2 trở lên.",
+                List.of(sourceCitation)
+        );
+        when(aiServiceClient.chat(any(AiServiceChatRequest.class))).thenReturn(aiResponse);
+
+        AiChatbotTurnResponse turn = aiChatbotService.askQuestion(
+                studentId,
+                conversation.getId(),
+                new SendAiMessageRequest("Điều kiện nhận học bổng KKHT là gì?", 5, null)
+        );
+
+        ArgumentCaptor<List<ChatMessage>> savedCaptor = ArgumentCaptor.forClass(List.class);
+        verify(messageRepository).saveAll(savedCaptor.capture());
+        List<ChatMessage> savedMessages = savedCaptor.getValue();
+
+        assertThat(savedMessages).hasSize(2);
+        assertThat(savedMessages.get(0)).isInstanceOf(UserMessage.class);
+        assertThat(savedMessages.get(1)).isInstanceOf(AIMessage.class);
+
+        UserMessage savedUserMsg = (UserMessage) savedMessages.get(0);
+        AIMessage savedAiMsg = (AIMessage) savedMessages.get(1);
+
+        assertThat(savedUserMsg.getSenderUserId()).isEqualTo(studentId.toString());
+        assertThat(savedAiMsg.getSenderType()).isEqualTo(MessageSenderType.AI);
+        assertThat(savedAiMsg.getCitations()).hasSize(1);
+        assertThat(savedAiMsg.getCitations().getFirst().getDocumentId()).isEqualTo(documentId.toString());
+        assertThat(savedAiMsg.getCitations().getFirst().getChunkReference()).isEqualTo("chunk_4");
+
+        assertThat(turn.title()).isEqualTo("Điều kiện nhận học bổng KKHT là gì?");
+        assertThat(turn.studentMessage().senderType()).isEqualTo(MessageSenderType.STUDENT);
+        assertThat(turn.aiMessage().senderType()).isEqualTo(MessageSenderType.AI);
+        assertThat(turn.aiMessage().citations()).hasSize(1);
+        assertThat(turn.aiMessage().citations().getFirst().documentId()).isEqualTo(documentId);
+
+        verify(mongoTemplate).updateFirst(any(Query.class), any(Update.class), eq(AIConversation.class));
+    }
+
+    @Test
+    @DisplayName("Không lưu tin nhắn vào MongoDB khi sia-ai-service ném lỗi 504")
+    void askQuestion_AiServiceTimeout_DoesNotSaveMessages() {
+        AIConversation conversation = new AIConversation(studentId, "Học bổng", null);
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(activeStudent));
+        when(conversationRepository.findByIdAndStudentIdAndConversationTypeAndDeletedAtIsNull(
+                conversation.getId(), studentId.toString(), "AI"
+        )).thenReturn(Optional.of(conversation));
+        when(aiServiceClient.chat(any(AiServiceChatRequest.class)))
+                .thenThrow(new AiServiceException(HttpStatus.GATEWAY_TIMEOUT, "Timeout"));
+
+        assertThatThrownBy(() -> aiChatbotService.askQuestion(
+                studentId,
+                conversation.getId(),
+                new SendAiMessageRequest("Câu hỏi", 5, null)
+        )).isInstanceOf(AiServiceException.class);
+
+        verify(messageRepository, never()).saveAll(anyList());
+    }
+
+    @Test
+    @DisplayName("Lấy lịch sử AIConversation ánh xạ đúng UserMessage và AIMessage kèm Citation")
+    void getMessages_ReturnsChronologicalPolymorphicMessages() {
+        AIConversation conversation = new AIConversation(studentId, "Tốt nghiệp", null);
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(activeStudent));
+        when(conversationRepository.findByIdAndStudentIdAndConversationTypeAndDeletedAtIsNull(
+                conversation.getId(), studentId.toString(), "AI"
+        )).thenReturn(Optional.of(conversation));
+
+        UserMessage userMsg = new UserMessage(conversation.getId(), studentId, AccountRole.STUDENT, "Câu hỏi 1");
+        Citation citation = new Citation(documentId, "qc.pdf", 2, "chunk_1", "Trích dẫn", 0.85);
+        AIMessage aiMsg = new AIMessage(conversation.getId(), "Trả lời 1", List.of(citation));
+
+        when(messageRepository.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(
+                eq(conversation.getId()), any(Pageable.class)
+        )).thenReturn(new SliceImpl<>(List.of(aiMsg, userMsg), Pageable.ofSize(30), false));
+
+        AiChatbotHistoryResponse history = aiChatbotService.getMessages(studentId, conversation.getId(), 0, 30);
+
+        assertThat(history.messages()).hasSize(2);
+        assertThat(history.messages().get(0).senderType()).isEqualTo(MessageSenderType.STUDENT);
+        assertThat(history.messages().get(0).citations()).isEmpty();
+        assertThat(history.messages().get(1).senderType()).isEqualTo(MessageSenderType.AI);
+        assertThat(history.messages().get(1).citations()).hasSize(1);
+    }
+
+    private static void setField(Object target, String fieldName, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(target, value);
+    }
+}
