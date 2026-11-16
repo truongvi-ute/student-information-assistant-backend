@@ -2,29 +2,27 @@ package vn.hcmute.edu.sia.entity;
 
 import java.time.Instant;
 import java.util.UUID;
-import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.mapping.Document;
-import org.springframework.data.mongodb.core.mapping.Field;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import vn.hcmute.edu.sia.enums.AccountRole;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.data.mongodb.core.mapping.Field;
+import vn.hcmute.edu.sia.enums.MessageSenderType;
 
 @Document(collection = "messages")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class ChatMessage {
+public abstract class ChatMessage {
+
     @Id
     private String id;
 
     @Field("conversation_id")
     private String conversationId;
 
-    @Field("sender_user_id")
-    private String senderUserId;
-
     @Field("sender_type")
-    private String senderType;
+    private MessageSenderType senderType;
 
     private String content;
 
@@ -40,45 +38,45 @@ public class ChatMessage {
     @Field("deleted_at")
     private Instant deletedAt;
 
-    public ChatMessage(
+    protected ChatMessage(
             String conversationId,
-            UUID senderUserId,
-            AccountRole senderRole,
-            String content
+            MessageSenderType senderType,
+            String content,
+            int maxContentLength
     ) {
         if (conversationId == null || conversationId.isBlank()) {
             throw new IllegalArgumentException("Conversation ID must not be blank");
         }
-
-        if (senderUserId == null) {
-            throw new IllegalArgumentException("Sender ID must not be null");
+        if (senderType == null) {
+            throw new IllegalArgumentException("Sender type must not be null");
         }
-
-        if (senderRole != AccountRole.STUDENT
-                && senderRole != AccountRole.ADVISOR) {
-            throw new IllegalArgumentException("Only students and advisors can send direct messages");
-        }
-
         if (content == null || content.isBlank()) {
             throw new IllegalArgumentException("Message content must not be blank");
         }
 
         String normalizedContent = content.strip();
-
-        if (normalizedContent.codePointCount(
-                0, normalizedContent.length()) > 2000) {
-            throw new IllegalArgumentException("Message content must not exceed 2000 characters");
+        if (normalizedContent.codePointCount(0, normalizedContent.length()) > maxContentLength) {
+            throw new IllegalArgumentException(
+                    "Message content must not exceed " + maxContentLength + " characters"
+            );
         }
 
         Instant now = Instant.now();
 
         this.id = UUID.randomUUID().toString();
         this.conversationId = conversationId.strip();
-        this.senderUserId = senderUserId.toString();
-        this.senderType = senderRole.name();
+        this.senderType = senderType;
         this.content = normalizedContent;
         this.messageType = "TEXT";
         this.createdAt = now;
         this.updatedAt = now;
+    }
+
+    public void deleteMessage() {
+        if (this.deletedAt == null) {
+            Instant now = Instant.now();
+            this.deletedAt = now;
+            this.updatedAt = now;
+        }
     }
 }
