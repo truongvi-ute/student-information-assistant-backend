@@ -16,7 +16,8 @@ import vn.hcmute.edu.sia.dto.response.*;
 import vn.hcmute.edu.sia.entity.Account;
 import vn.hcmute.edu.sia.entity.AdvisorProfile;
 import vn.hcmute.edu.sia.entity.ChatConversation;
-import vn.hcmute.edu.sia.entity.ChatMessage;
+import vn.hcmute.edu.sia.entity.DirectConversation;
+import vn.hcmute.edu.sia.entity.UserMessage;
 import vn.hcmute.edu.sia.enums.AccountAccessStatus;
 import vn.hcmute.edu.sia.enums.AccountRole;
 import vn.hcmute.edu.sia.enums.CatalogStatus;
@@ -82,19 +83,19 @@ public class ChatServiceImpl implements ChatService {
                 ? sender
                 : recipient;
 
-        ChatConversation conversation = getOrCreateConversation(
+        DirectConversation conversation = getOrCreateConversation(
                 student,
                 advisor
         );
 
-        ChatMessage message = new ChatMessage(
+        UserMessage message = new UserMessage(
                 conversation.getId(),
                 sender.getId(),
                 sender.getRole(),
                 content
         );
 
-        ChatMessage saved = messageRepository.save(message);
+        UserMessage saved = messageRepository.save(message);
 
         Query updateQuery = new Query(
                 Criteria.where("_id").is(conversation.getId())
@@ -181,7 +182,7 @@ public class ChatServiceImpl implements ChatService {
         Account currentUser = accountRepository.findById(currentUserId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account not found"));
 
-        List<ChatConversation> rawConversations;
+        List<DirectConversation> rawConversations;
         if (currentUser.getRole() == AccountRole.STUDENT) {
             rawConversations = conversationRepository
                     .findByStudentIdAndConversationType(currentUserId.toString(), "ADVISOR");
@@ -192,7 +193,7 @@ public class ChatServiceImpl implements ChatService {
             return List.of();
         }
 
-        List<ChatConversation> activeConversations = rawConversations.stream()
+        List<DirectConversation> activeConversations = rawConversations.stream()
                 .filter(c -> c.getDeletedAt() == null)
                 .toList();
 
@@ -201,7 +202,7 @@ public class ChatServiceImpl implements ChatService {
         }
 
         Set<UUID> partnerIds = new HashSet<>();
-        for (ChatConversation c : activeConversations) {
+        for (DirectConversation c : activeConversations) {
             String partnerIdStr = currentUser.getRole() == AccountRole.STUDENT
                     ? c.getAdvisorId()
                     : c.getStudentId();
@@ -231,7 +232,7 @@ public class ChatServiceImpl implements ChatService {
         }
 
         List<ChatConversationResponse> result = new ArrayList<>();
-        for (ChatConversation conv : activeConversations) {
+        for (DirectConversation conv : activeConversations) {
             UUID partnerId;
             try {
                 partnerId = currentUser.getRole() == AccountRole.STUDENT
@@ -349,6 +350,8 @@ public class ChatServiceImpl implements ChatService {
 
         List<ChatMessageResponse> messages = new ArrayList<>(
                 slice.getContent().stream()
+                        .filter(UserMessage.class::isInstance)
+                        .map(UserMessage.class::cast)
                         .map(message -> {
                             String senderId = message.getSenderUserId();
 
@@ -372,7 +375,7 @@ public class ChatServiceImpl implements ChatService {
         return new ChatHistoryResponse(messages, slice.hasNext());
     }
 
-    private ChatConversation getOrCreateConversation(
+    private DirectConversation getOrCreateConversation(
             Account student,
             Account advisor
     ) {
@@ -392,7 +395,7 @@ public class ChatServiceImpl implements ChatService {
 
         try {
             return conversationRepository.insert(
-                    new ChatConversation(
+                    new DirectConversation(
                             student.getId(),
                             advisor.getId()
                     )
