@@ -10,5 +10,9 @@ public interface DocumentStorageService {
 
     StoredDocumentFile store(MultipartFile file, String mimeType) throws IOException;
 
+    byte[] loadBytes(String storagePath) throws IOException;
+
+    String loadUtf8Text(String storagePath) throws IOException;
+
     void delete(String storagePath) throws IOException;
 }
