@@ -8,5 +8,6 @@ import vn.hcmute.edu.sia.entity.ChatMessage;
 
 public interface ChatMessageRepository extends MongoRepository<ChatMessage, String> {
     Slice<ChatMessage> findByConversationIdOrderByCreatedAtDescIdDesc(String conversationId, Pageable pageable);
+    Slice<ChatMessage> findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(String conversationId, Pageable pageable);
     Optional<ChatMessage> findFirstByConversationIdOrderByCreatedAtDesc(String conversationId);
 }

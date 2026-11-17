@@ -1,4 +1,4 @@
-package vn.hcmute.edu.sia.service.implement;
+package vn.hcmute.edu.sia.service;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -23,6 +23,7 @@ import vn.hcmute.edu.sia.enums.RagStatus;
 import vn.hcmute.edu.sia.repository.AccountRepository;
 import vn.hcmute.edu.sia.repository.DocumentRepository;
 import vn.hcmute.edu.sia.service.DocumentStorageService;
+import vn.hcmute.edu.sia.service.implement.DocumentServiceImpl;
 import vn.hcmute.edu.sia.validation.DocumentUploadValidator;
 
 import java.io.IOException;

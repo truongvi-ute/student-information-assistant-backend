@@ -9,7 +9,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
 @Document(collection = "conversations")
-@TypeAlias("AI")
+@TypeAlias("AI_CONVERSATION")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class AIConversation extends ChatConversation {

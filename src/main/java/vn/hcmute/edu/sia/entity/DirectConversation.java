@@ -9,7 +9,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
 @Document(collection = "conversations")
-@TypeAlias("ADVISOR")
+@TypeAlias("DIRECT_CONVERSATION")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class DirectConversation extends ChatConversation {

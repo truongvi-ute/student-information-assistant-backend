@@ -11,7 +11,7 @@ import vn.hcmute.edu.sia.enums.AccountRole;
 import vn.hcmute.edu.sia.enums.MessageSenderType;
 
 @Document(collection = "messages")
-@TypeAlias("USER")
+@TypeAlias("USER_MESSAGE")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class UserMessage extends ChatMessage {
