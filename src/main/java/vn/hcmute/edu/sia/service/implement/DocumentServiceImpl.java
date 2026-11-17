@@ -177,7 +177,8 @@ public class DocumentServiceImpl implements DocumentService {
         return new DownloadedDocumentFile(
                 document.getOriginalFilename(),
                 document.getMimeType(),
-                content
+                content,
+                document.isDownloadable()
         );
     }
 

@@ -186,6 +186,7 @@ class DocumentServiceImplTest {
         assertThat(downloaded.originalFilename()).isEqualTo("quy_che.pdf");
         assertThat(downloaded.mimeType()).isEqualTo("application/pdf");
         assertThat(downloaded.content()).isEqualTo("pdf-bytes".getBytes());
+        assertThat(downloaded.allowDownload()).isTrue();
     }
 
     @Test
@@ -224,6 +225,7 @@ class DocumentServiceImplTest {
 
         assertThat(previewed.originalFilename()).isEqualTo("view_only.pdf");
         assertThat(previewed.content()).isEqualTo("pdf-preview".getBytes());
+        assertThat(previewed.allowDownload()).isFalse();
     }
 
     private static void setId(Document doc, UUID id) throws Exception {

@@ -111,6 +111,7 @@ public class DocumentController {
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(file.mimeType()))
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .header("X-Allow-Download", String.valueOf(file.allowDownload()))
                 .body(file.content());
     }
 }

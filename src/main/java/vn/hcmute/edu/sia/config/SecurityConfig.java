@@ -109,7 +109,7 @@ public class SecurityConfig {
                 );
 
                 configuration.setExposedHeaders(
-                        List.of("Content-Disposition")
+                        List.of("Content-Disposition", "X-Allow-Download")
                 );
 
                 configuration.setAllowCredentials(true);
