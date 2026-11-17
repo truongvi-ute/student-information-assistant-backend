@@ -241,16 +241,17 @@ public class AiChatbotServiceImpl implements AiChatbotService {
             return List.of();
         }
 
-        Set<String> filenames = sources.stream()
+        Set<String> fallbackFilenames = sources.stream()
                 .filter(Objects::nonNull)
+                .filter(source -> parseUuidOrNull(source.documentId()) == null)
                 .map(AiServiceSourceCitation::filename)
                 .filter(name -> name != null && !name.isBlank())
                 .map(String::strip)
                 .collect(Collectors.toSet());
 
         Map<String, UUID> documentIdByFilename = new HashMap<>();
-        if (!filenames.isEmpty()) {
-            for (Document doc : documentRepository.findByOriginalFilenameIn(filenames)) {
+        if (!fallbackFilenames.isEmpty()) {
+            for (Document doc : documentRepository.findByOriginalFilenameIn(fallbackFilenames)) {
                 documentIdByFilename.putIfAbsent(doc.getOriginalFilename(), doc.getId());
             }
         }
@@ -261,21 +262,43 @@ public class AiChatbotServiceImpl implements AiChatbotService {
                 continue;
             }
             String filename = source.filename().strip();
+            UUID resolvedDocumentId = parseUuidOrNull(source.documentId());
+            if (resolvedDocumentId == null) {
+                resolvedDocumentId = documentIdByFilename.get(filename);
+            }
+
             Integer pageNumber = source.pageNumber() != null && source.pageNumber() > 0
                     ? source.pageNumber()
                     : null;
 
+            String quotedContent = source.content() != null && !source.content().isBlank()
+                    ? source.content()
+                    : source.snippet();
+
             citations.add(new Citation(
-                    documentIdByFilename.get(filename),
+                    resolvedDocumentId,
                     filename,
                     pageNumber,
                     "chunk_" + source.chunkIndex(),
-                    source.snippet(),
-                    source.score()
+                    quotedContent,
+                    source.score(),
+                    source.charStart(),
+                    source.charEnd()
             ));
         }
 
         return citations;
+    }
+
+    private UUID parseUuidOrNull(String rawUuid) {
+        if (rawUuid == null || rawUuid.isBlank()) {
+            return null;
+        }
+        try {
+            return UUID.fromString(rawUuid.strip());
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     private AiConversationResponse toConversationResponse(AIConversation conversation) {
@@ -332,7 +355,9 @@ public class AiChatbotServiceImpl implements AiChatbotService {
                 citation.getPageNumber(),
                 citation.getChunkReference(),
                 citation.getQuotedContent(),
-                citation.getRelevanceScore()
+                citation.getRelevanceScore(),
+                citation.getCharStart(),
+                citation.getCharEnd()
         );
     }
 
