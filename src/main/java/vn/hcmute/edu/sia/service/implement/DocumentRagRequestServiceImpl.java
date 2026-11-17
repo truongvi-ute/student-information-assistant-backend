@@ -1,11 +1,21 @@
 package vn.hcmute.edu.sia.service.implement;
 
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+
+import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
-import lombok.RequiredArgsConstructor;
+import vn.hcmute.edu.sia.dto.internal.AiServiceIngestRequest;
+import vn.hcmute.edu.sia.dto.response.DocumentRagRequestResponse;
 import vn.hcmute.edu.sia.entity.Account;
 import vn.hcmute.edu.sia.entity.Document;
 import vn.hcmute.edu.sia.entity.DocumentRagRequest;
@@ -16,17 +26,24 @@ import vn.hcmute.edu.sia.enums.DocumentRequestType;
 import vn.hcmute.edu.sia.repository.AccountRepository;
 import vn.hcmute.edu.sia.repository.DocumentRagRequestRepository;
 import vn.hcmute.edu.sia.repository.DocumentRepository;
+import vn.hcmute.edu.sia.service.AiServiceClient;
 import vn.hcmute.edu.sia.service.DocumentRagRequestService;
-import java.util.List;
-import vn.hcmute.edu.sia.dto.response.DocumentRagRequestResponse;
+import vn.hcmute.edu.sia.service.DocumentRagStatusService;
 
 @Service
 @RequiredArgsConstructor
 public class DocumentRagRequestServiceImpl implements DocumentRagRequestService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(DocumentRagRequestServiceImpl.class);
+
     private final AccountRepository accountRepository;
     private final DocumentRepository documentRepository;
     private final DocumentRagRequestRepository requestRepository;
+    private final AiServiceClient aiServiceClient;
+    private final DocumentRagStatusService documentRagStatusService;
+
+    @Value("${app.ai-service.callback-base-url:http://localhost:8080}")
+    private String callbackBaseUrl = "http://localhost:8080";
 
     @Override
     @Transactional
@@ -39,10 +56,10 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
         }
 
         Document document = documentRepository.findByIdForUpdate(documentId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document was not found" ));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document was not found"));
 
         if (!document.getUploadedBy().getId().equals(advisorId)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You can only submit requests for your own documents" );
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You can only submit requests for your own documents");
         }
 
         DocumentRagRequest request = new DocumentRagRequest(document, advisor);
@@ -99,6 +116,17 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document request was not found"));
 
         request.approve(admin);
+
+        if (request.getRequestType() == DocumentRequestType.ADD) {
+            Document document = request.getDocument();
+            document.startRagProcessing();
+            scheduleStorageIngestion(
+                    document.getId(),
+                    document.getStoragePath(),
+                    document.getOriginalFilename(),
+                    document.getTitle()
+            );
+        }
     }
 
     @Override
@@ -115,5 +143,57 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document request was not found"));
 
         request.reject(admin, reason);
+    }
+
+    private void scheduleStorageIngestion(
+            UUID documentId,
+            String storagePath,
+            String originalFilename,
+            String title
+    ) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    triggerStorageIngestion(documentId, storagePath, originalFilename, title);
+                }
+            });
+            return;
+        }
+        triggerStorageIngestion(documentId, storagePath, originalFilename, title);
+    }
+
+    private void triggerStorageIngestion(
+            UUID documentId,
+            String storagePath,
+            String originalFilename,
+            String title
+    ) {
+        if (aiServiceClient == null || documentId == null) {
+            return;
+        }
+
+        String normalizedBaseUrl = callbackBaseUrl != null
+                ? callbackBaseUrl.replaceAll("/+$", "")
+                : "http://localhost:8080";
+        String callbackUrl = normalizedBaseUrl + "/api/internal/documents/" + documentId + "/rag-status";
+        Map<String, Object> metadata = title != null && !title.isBlank()
+                ? Map.of("title", title)
+                : Map.of();
+
+        try {
+            aiServiceClient.ingestFromStorage(new AiServiceIngestRequest(
+                    documentId.toString(),
+                    storagePath,
+                    originalFilename,
+                    callbackUrl,
+                    metadata
+            ));
+        } catch (RuntimeException exception) {
+            LOGGER.error("Failed to trigger AI ingestion for document {}", documentId, exception);
+            if (documentRagStatusService != null) {
+                documentRagStatusService.markFailed(documentId);
+            }
+        }
     }
 }

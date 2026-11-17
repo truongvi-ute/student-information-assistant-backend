@@ -59,6 +59,7 @@ public class SecurityConfig {
                         "/api/auth/forgot-password/resend-otp",
                         "/api/auth/forgot-password/verify-otp",
                         "/api/auth/reset-password",
+                                "/api/internal/**",
                                 "/chat-websocket",
                                 "/chat-websocket/**"
                         ).permitAll()
