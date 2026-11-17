@@ -1,5 +1,7 @@
 package vn.hcmute.edu.sia.service;
 
+import java.util.Map;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -10,6 +12,8 @@ import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 import vn.hcmute.edu.sia.dto.internal.AiServiceChatRequest;
 import vn.hcmute.edu.sia.dto.internal.AiServiceChatResponse;
+import vn.hcmute.edu.sia.dto.internal.AiServiceIngestRequest;
+import vn.hcmute.edu.sia.dto.internal.AiServiceIngestResponse;
 import vn.hcmute.edu.sia.exception.AiServiceException;
 import vn.hcmute.edu.sia.service.implement.AiServiceClientImpl;
 
@@ -43,11 +47,15 @@ class AiServiceClientTest {
                   "answer": "Sinh viên cần tích lũy đủ tín chỉ và chuẩn đầu ra ngoại ngữ.",
                   "sources": [
                     {
+                      "document_id": "11111111-1111-1111-1111-111111111111",
                       "filename": "quy_che_2026.pdf",
                       "page_number": 5,
                       "chunk_index": 3,
+                      "char_start": 120,
+                      "char_end": 260,
                       "score": 0.912,
-                      "snippet": "Điều 14: Điều kiện xét tốt nghiệp..."
+                      "snippet": "Điều 14: Điều kiện xét tốt nghiệp...",
+                      "content": "Điều 14: Điều kiện xét tốt nghiệp đại học chính quy."
                     }
                   ]
                 }
@@ -67,9 +75,13 @@ class AiServiceClientTest {
         mockServer.verify();
         assertThat(response.answer()).contains("chuẩn đầu ra ngoại ngữ");
         assertThat(response.sources()).hasSize(1);
+        assertThat(response.sources().getFirst().documentId()).isEqualTo("11111111-1111-1111-1111-111111111111");
         assertThat(response.sources().getFirst().filename()).isEqualTo("quy_che_2026.pdf");
         assertThat(response.sources().getFirst().pageNumber()).isEqualTo(5);
         assertThat(response.sources().getFirst().chunkIndex()).isEqualTo(3);
+        assertThat(response.sources().getFirst().charStart()).isEqualTo(120);
+        assertThat(response.sources().getFirst().charEnd()).isEqualTo(260);
+        assertThat(response.sources().getFirst().content()).isEqualTo("Điều 14: Điều kiện xét tốt nghiệp đại học chính quy.");
         assertThat(response.sources().getFirst().score()).isEqualTo(0.912);
     }
 
@@ -95,5 +107,45 @@ class AiServiceClientTest {
                 .isInstanceOf(AiServiceException.class)
                 .extracting(ex -> ((AiServiceException) ex).getStatus())
                 .isEqualTo(HttpStatus.BAD_GATEWAY);
+    }
+
+    @Test
+    @DisplayName("Gọi POST /v1/documents/ingest-from-storage thành công và ánh xạ snake_case")
+    void ingestFromStorage_Success_MapsSnakeCasePayloadAndResponse() {
+        String responseJson = """
+                {
+                  "status": "processing",
+                  "document_id": "doc-123",
+                  "message": "Accepted"
+                }
+                """;
+
+        mockServer.expect(requestTo("http://localhost:8000/v1/documents/ingest-from-storage"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.document_id").value("doc-123"))
+                .andExpect(jsonPath("$.file_key").value("documents/doc-123.pdf"))
+                .andExpect(jsonPath("$.filename").value("quy_che.pdf"))
+                .andExpect(jsonPath("$.callback_url").value("http://localhost:8080/api/internal/documents/doc-123/rag-status"))
+                .andRespond(withStatus(HttpStatus.ACCEPTED).contentType(MediaType.APPLICATION_JSON).body(responseJson));
+
+        AiServiceIngestResponse response = aiServiceClient.ingestFromStorage(new AiServiceIngestRequest(
+                "doc-123",
+                "documents/doc-123.pdf",
+                "quy_che.pdf",
+                "http://localhost:8080/api/internal/documents/doc-123/rag-status",
+                Map.of("title", "Quy chế")
+        ));
+
+        mockServer.verify();
+        assertThat(response.status()).isEqualTo("processing");
+        assertThat(response.documentId()).isEqualTo("doc-123");
+    }
+
+    @Test
+    @DisplayName("Từ chối gọi ingestFromStorage khi thiếu documentId hoặc fileKey")
+    void ingestFromStorage_BlankFields_ThrowsIllegalArgument() {
+        assertThatThrownBy(() -> aiServiceClient.ingestFromStorage(
+                new AiServiceIngestRequest(" ", "documents/a.pdf", "a.pdf", null, Map.of())
+        )).isInstanceOf(IllegalArgumentException.class);
     }
 }
