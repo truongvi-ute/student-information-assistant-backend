@@ -1,6 +1,8 @@
 package vn.hcmute.edu.sia.service.implement;
 
 import java.net.SocketTimeoutException;
+import java.util.function.Supplier;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -11,6 +13,8 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import vn.hcmute.edu.sia.dto.internal.AiServiceChatRequest;
 import vn.hcmute.edu.sia.dto.internal.AiServiceChatResponse;
+import vn.hcmute.edu.sia.dto.internal.AiServiceIngestRequest;
+import vn.hcmute.edu.sia.dto.internal.AiServiceIngestResponse;
 import vn.hcmute.edu.sia.exception.AiServiceException;
 import vn.hcmute.edu.sia.service.AiServiceClient;
 
@@ -26,19 +30,74 @@ public class AiServiceClientImpl implements AiServiceClient {
             throw new IllegalArgumentException("Question must not be blank");
         }
 
-        AiServiceChatResponse response;
+        AiServiceChatResponse response = executePost(
+                "/v1/chat",
+                request,
+                AiServiceChatResponse.class,
+                "generating answer"
+        );
+
+        if (response == null || response.answer() == null || response.answer().isBlank()) {
+            throw new AiServiceException(
+                    HttpStatus.BAD_GATEWAY,
+                    "AI service returned an empty answer"
+            );
+        }
+
+        return response;
+    }
+
+    @Override
+    public AiServiceIngestResponse ingestFromStorage(AiServiceIngestRequest request) {
+        if (request == null
+                || request.documentId() == null || request.documentId().isBlank()
+                || request.fileKey() == null || request.fileKey().isBlank()
+                || request.filename() == null || request.filename().isBlank()) {
+            throw new IllegalArgumentException("Document ID, file key, and filename must not be blank");
+        }
+
+        AiServiceIngestResponse response = executePost(
+                "/v1/documents/ingest-from-storage",
+                request,
+                AiServiceIngestResponse.class,
+                "starting document ingestion"
+        );
+
+        if (response == null || response.status() == null || response.status().isBlank()) {
+            throw new AiServiceException(
+                    HttpStatus.BAD_GATEWAY,
+                    "AI service returned an empty ingestion response"
+            );
+        }
+
+        return response;
+    }
+
+    private <T> T executePost(
+            String uri,
+            Object body,
+            Class<T> responseType,
+            String timeoutContext
+    ) {
+        return handleUpstreamErrors(
+                () -> aiServiceRestClient.post()
+                        .uri(uri)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(body)
+                        .retrieve()
+                        .body(responseType),
+                timeoutContext
+        );
+    }
+
+    private <T> T handleUpstreamErrors(Supplier<T> action, String timeoutContext) {
         try {
-            response = aiServiceRestClient.post()
-                    .uri("/v1/chat")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(request)
-                    .retrieve()
-                    .body(AiServiceChatResponse.class);
+            return action.get();
         } catch (HttpStatusCodeException exception) {
             if (exception.getStatusCode().value() == HttpStatus.GATEWAY_TIMEOUT.value()) {
                 throw new AiServiceException(
                         HttpStatus.GATEWAY_TIMEOUT,
-                        "AI service timed out while generating answer",
+                        "AI service timed out while " + timeoutContext,
                         exception
                 );
             }
@@ -51,7 +110,7 @@ public class AiServiceClientImpl implements AiServiceClient {
             if (exception.getCause() instanceof SocketTimeoutException) {
                 throw new AiServiceException(
                         HttpStatus.GATEWAY_TIMEOUT,
-                        "AI service timed out while generating answer",
+                        "AI service timed out while " + timeoutContext,
                         exception
                 );
             }
@@ -67,14 +126,5 @@ public class AiServiceClientImpl implements AiServiceClient {
                     exception
             );
         }
-
-        if (response == null || response.answer() == null || response.answer().isBlank()) {
-            throw new AiServiceException(
-                    HttpStatus.BAD_GATEWAY,
-                    "AI service returned an empty answer"
-            );
-        }
-
-        return response;
     }
 }
