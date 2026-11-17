@@ -68,6 +68,24 @@ public class DocumentController {
         return ResponseEntity.ok(response);
     }
 
+    @GetMapping("/{documentId}/preview")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<byte[]> previewDocument(
+            @AuthenticationPrincipal AccountPrincipal principal,
+            @PathVariable UUID documentId
+    ) {
+        DownloadedDocumentFile file = documentService.previewDocument(
+                principal.getAccountId(),
+                documentId
+        );
+        return buildFileResponse(
+                file,
+                ContentDisposition.inline()
+                        .filename(file.originalFilename(), StandardCharsets.UTF_8)
+                        .build()
+        );
+    }
+
     @GetMapping("/{documentId}/download")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<byte[]> downloadDocument(
@@ -78,11 +96,18 @@ public class DocumentController {
                 principal.getAccountId(),
                 documentId
         );
+        return buildFileResponse(
+                file,
+                ContentDisposition.attachment()
+                        .filename(file.originalFilename(), StandardCharsets.UTF_8)
+                        .build()
+        );
+    }
 
-        ContentDisposition disposition = ContentDisposition.attachment()
-                .filename(file.originalFilename(), StandardCharsets.UTF_8)
-                .build();
-
+    private ResponseEntity<byte[]> buildFileResponse(
+            DownloadedDocumentFile file,
+            ContentDisposition disposition
+    ) {
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(file.mimeType()))
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())

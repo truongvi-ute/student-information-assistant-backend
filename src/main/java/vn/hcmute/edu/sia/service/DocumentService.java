@@ -17,5 +17,7 @@ public interface DocumentService {
 
     DocumentContentResponse getDocumentContent(UUID requesterId, UUID documentId);
 
+    DownloadedDocumentFile previewDocument(UUID requesterId, UUID documentId);
+
     DownloadedDocumentFile downloadDocument(UUID requesterId, UUID documentId);
 }

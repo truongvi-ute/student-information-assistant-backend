@@ -206,6 +206,26 @@ class DocumentServiceImplTest {
                 .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
     }
 
+    @Test
+    @DisplayName("Xem trước file gốc vẫn thành công ngay cả khi allowDownload = false")
+    void previewDocument_AllowDownloadFalse_StillReturnsBytesForStudent() throws Exception {
+        UUID studentId = UUID.randomUUID();
+        UUID docId = UUID.randomUUID();
+        Account student = new Account("Student", "s@test.edu.vn", "hash", AccountRole.STUDENT, AccountAccessStatus.ACTIVE, false);
+        Document doc = new Document(advisor, "Nội bộ", null, false, "view_only.pdf", "documents/view_only.pdf", "application/pdf", 100L, "c".repeat(64));
+        setId(doc, docId);
+        doc.completeRagIndexing();
+
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(student));
+        when(documentRepository.findById(docId)).thenReturn(Optional.of(doc));
+        when(documentStorageService.loadBytes("documents/view_only.pdf")).thenReturn("pdf-preview".getBytes());
+
+        DownloadedDocumentFile previewed = documentService.previewDocument(studentId, docId);
+
+        assertThat(previewed.originalFilename()).isEqualTo("view_only.pdf");
+        assertThat(previewed.content()).isEqualTo("pdf-preview".getBytes());
+    }
+
     private static void setId(Document doc, UUID id) throws Exception {
         Field field = Document.class.getDeclaredField("id");
         field.setAccessible(true);

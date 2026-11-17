@@ -132,7 +132,21 @@ public class DocumentServiceImpl implements DocumentService {
 
     @Override
     @Transactional(readOnly = true)
+    public DownloadedDocumentFile previewDocument(UUID requesterId, UUID documentId) {
+        return loadOriginalDocument(requesterId, documentId, false);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public DownloadedDocumentFile downloadDocument(UUID requesterId, UUID documentId) {
+        return loadOriginalDocument(requesterId, documentId, true);
+    }
+
+    private DownloadedDocumentFile loadOriginalDocument(
+            UUID requesterId,
+            UUID documentId,
+            boolean requireDownloadable
+    ) {
         Account requester = requireActiveAccount(requesterId);
         Document document = requireDocument(documentId);
 
@@ -143,7 +157,7 @@ public class DocumentServiceImpl implements DocumentService {
             );
         }
 
-        if (!document.isDownloadable()) {
+        if (requireDownloadable && !document.isDownloadable()) {
             throw new ResponseStatusException(
                     HttpStatus.FORBIDDEN,
                     "This document is not available for download"
@@ -155,7 +169,7 @@ public class DocumentServiceImpl implements DocumentService {
             content = documentStorageService.loadBytes(document.getStoragePath());
         } catch (IOException exception) {
             throw new DocumentStorageException(
-                    "Could not download the document from RustFS",
+                    "Could not load the document from RustFS",
                     exception
             );
         }
