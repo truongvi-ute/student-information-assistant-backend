@@ -13,6 +13,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
+import vn.hcmute.edu.sia.dto.internal.AiServiceIngestRequest;
+import vn.hcmute.edu.sia.dto.internal.AiServiceIngestResponse;
 import vn.hcmute.edu.sia.entity.Account;
 import vn.hcmute.edu.sia.entity.Document;
 import vn.hcmute.edu.sia.entity.DocumentRagRequest;
@@ -20,9 +22,12 @@ import vn.hcmute.edu.sia.enums.AccountAccessStatus;
 import vn.hcmute.edu.sia.enums.AccountRole;
 import vn.hcmute.edu.sia.enums.DocumentRequestStatus;
 import vn.hcmute.edu.sia.enums.DocumentRequestType;
+import vn.hcmute.edu.sia.exception.AiServiceException;
 import vn.hcmute.edu.sia.repository.AccountRepository;
 import vn.hcmute.edu.sia.repository.DocumentRagRequestRepository;
 import vn.hcmute.edu.sia.repository.DocumentRepository;
+import vn.hcmute.edu.sia.service.AiServiceClient;
+import vn.hcmute.edu.sia.service.DocumentRagStatusService;
 import vn.hcmute.edu.sia.service.implement.DocumentRagRequestServiceImpl;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,6 +41,8 @@ class DocumentRagRequestServiceImplTest {
     @Mock private AccountRepository accountRepository;
     @Mock private DocumentRepository documentRepository;
     @Mock private DocumentRagRequestRepository requestRepository;
+    @Mock private AiServiceClient aiServiceClient;
+    @Mock private DocumentRagStatusService documentRagStatusService;
     @Mock private Account advisor;
     @Mock private Account admin;
     @Mock private Document document;
@@ -180,11 +187,41 @@ class DocumentRagRequestServiceImplTest {
     @Test
     void adminApprovesPendingRequest() {
         prepareAdmin();
+        when(document.getId()).thenReturn(documentId);
+        when(document.getStoragePath()).thenReturn("documents/" + documentId + ".pdf");
+        when(document.getOriginalFilename()).thenReturn("quy_che.pdf");
+        when(document.getTitle()).thenReturn("Quy chế");
+        when(aiServiceClient.ingestFromStorage(any(AiServiceIngestRequest.class)))
+                .thenReturn(new AiServiceIngestResponse("processing", documentId.toString(), "Accepted"));
+
         DocumentRagRequest request = new DocumentRagRequest(document, advisor);
         when(requestRepository.findByIdForUpdate(requestId)).thenReturn(Optional.of(request));
         service.approveRequest(adminId, requestId);
+
         assertThat(request.getStatus()).isEqualTo(DocumentRequestStatus.APPROVED);
         assertThat(request.getReviewedByAdmin()).isSameAs(admin);
+        verify(document).startRagProcessing();
+        verify(aiServiceClient).ingestFromStorage(any(AiServiceIngestRequest.class));
+        verify(documentRagStatusService, never()).markFailed(any());
+    }
+
+    @Test
+    void adminApprovesPendingRequestMarksFailedWhenAiServiceFails() {
+        prepareAdmin();
+        when(document.getId()).thenReturn(documentId);
+        when(document.getStoragePath()).thenReturn("documents/" + documentId + ".pdf");
+        when(document.getOriginalFilename()).thenReturn("quy_che.pdf");
+        when(document.getTitle()).thenReturn("Quy chế");
+        when(aiServiceClient.ingestFromStorage(any(AiServiceIngestRequest.class)))
+                .thenThrow(new AiServiceException(HttpStatus.BAD_GATEWAY, "AI service down"));
+
+        DocumentRagRequest request = new DocumentRagRequest(document, advisor);
+        when(requestRepository.findByIdForUpdate(requestId)).thenReturn(Optional.of(request));
+        service.approveRequest(adminId, requestId);
+
+        assertThat(request.getStatus()).isEqualTo(DocumentRequestStatus.APPROVED);
+        verify(document).startRagProcessing();
+        verify(documentRagStatusService).markFailed(documentId);
     }
 
     @Test

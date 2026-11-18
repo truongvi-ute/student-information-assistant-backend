@@ -2,6 +2,7 @@ package vn.hcmute.edu.sia.service.implement;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -15,8 +16,10 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
 import software.amazon.awssdk.core.exception.SdkException;
@@ -24,7 +27,9 @@ import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
@@ -103,6 +108,49 @@ public class RustFsDocumentStorageService implements DocumentStorageService {
                 LOGGER.warn("Could not delete temporary document upload file", cleanupException);
             }
         }
+    }
+
+    @Override
+    public byte[] loadBytes(String storagePath) throws IOException {
+        if (storagePath == null || storagePath.isBlank()) {
+            throw new IllegalArgumentException("Storage path must not be blank");
+        }
+
+        try {
+            return s3Client.getObjectAsBytes(GetObjectRequest.builder()
+                            .bucket(bucketName)
+                            .key(storagePath.strip())
+                            .build())
+                    .asByteArray();
+        } catch (NoSuchKeyException exception) {
+            throw new ResponseStatusException(
+                    HttpStatus.NOT_FOUND,
+                    "Document file was not found in storage",
+                    exception
+            );
+        } catch (S3Exception exception) {
+            if (exception.statusCode() == 404) {
+                throw new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Document file was not found in storage",
+                        exception
+                );
+            }
+            throw new DocumentStorageException(
+                    "RustFS could not load the requested document",
+                    exception
+            );
+        } catch (SdkException exception) {
+            throw new DocumentStorageException(
+                    "RustFS could not load the requested document",
+                    exception
+            );
+        }
+    }
+
+    @Override
+    public String loadUtf8Text(String storagePath) throws IOException {
+        return new String(loadBytes(storagePath), StandardCharsets.UTF_8);
     }
 
     @Override

@@ -10,8 +10,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.server.ResponseStatusException;
+import vn.hcmute.edu.sia.dto.internal.DownloadedDocumentFile;
 import vn.hcmute.edu.sia.dto.internal.StoredDocumentFile;
 import vn.hcmute.edu.sia.dto.request.UploadDocumentRequest;
+import vn.hcmute.edu.sia.dto.response.DocumentContentResponse;
 import vn.hcmute.edu.sia.dto.response.DocumentResponse;
 import vn.hcmute.edu.sia.dto.response.DocumentUploadResponse;
 import vn.hcmute.edu.sia.entity.Account;
@@ -27,6 +29,7 @@ import vn.hcmute.edu.sia.service.implement.DocumentServiceImpl;
 import vn.hcmute.edu.sia.validation.DocumentUploadValidator;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -124,5 +127,110 @@ class DocumentServiceImplTest {
 
         assertThat(result).hasSize(1);
         assertThat(result.getFirst().title()).isEqualTo("Tài liệu 1");
+    }
+
+    @Test
+    @DisplayName("Sinh viên lấy nội dung Markdown của tài liệu ACTIVE + READY thành công")
+    void getDocumentContent_ActiveStudentEligibleDoc_ReturnsMarkdown() throws Exception {
+        UUID studentId = UUID.randomUUID();
+        UUID docId = UUID.randomUUID();
+        Account student = new Account("Student", "s@test.edu.vn", "hash", AccountRole.STUDENT, AccountAccessStatus.ACTIVE, false);
+        Document doc = new Document(advisor, "Quy chế", null, true, "quy_che.pdf", "documents/qc.pdf", "application/pdf", 100L, "c".repeat(64));
+        setId(doc, docId);
+        doc.completeRagIndexing();
+
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(student));
+        when(documentRepository.findById(docId)).thenReturn(Optional.of(doc));
+        when(documentStorageService.loadUtf8Text("extracted/" + docId + ".md")).thenReturn("# Quy chế");
+
+        DocumentContentResponse response = documentService.getDocumentContent(studentId, docId);
+
+        assertThat(response.documentId()).isEqualTo(docId);
+        assertThat(response.markdownContent()).isEqualTo("# Quy chế");
+        assertThat(response.allowDownload()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Sinh viên bị chặn đọc tài liệu chưa READY/ACTIVE")
+    void getDocumentContent_StudentDraftDoc_ThrowsForbidden() throws Exception {
+        UUID studentId = UUID.randomUUID();
+        UUID docId = UUID.randomUUID();
+        Account student = new Account("Student", "s@test.edu.vn", "hash", AccountRole.STUDENT, AccountAccessStatus.ACTIVE, false);
+        Document doc = new Document(advisor, "Nháp", null, true, "draft.pdf", "documents/draft.pdf", "application/pdf", 100L, "c".repeat(64));
+        setId(doc, docId);
+
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(student));
+        when(documentRepository.findById(docId)).thenReturn(Optional.of(doc));
+
+        assertThatThrownBy(() -> documentService.getDocumentContent(studentId, docId))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+    }
+
+    @Test
+    @DisplayName("Tải file gốc thành công khi allowDownload = true")
+    void downloadDocument_EligibleAndDownloadable_ReturnsBytes() throws Exception {
+        UUID studentId = UUID.randomUUID();
+        UUID docId = UUID.randomUUID();
+        Account student = new Account("Student", "s@test.edu.vn", "hash", AccountRole.STUDENT, AccountAccessStatus.ACTIVE, false);
+        Document doc = new Document(advisor, "Quy chế", null, true, "quy_che.pdf", "documents/qc.pdf", "application/pdf", 100L, "c".repeat(64));
+        setId(doc, docId);
+        doc.completeRagIndexing();
+
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(student));
+        when(documentRepository.findById(docId)).thenReturn(Optional.of(doc));
+        when(documentStorageService.loadBytes("documents/qc.pdf")).thenReturn("pdf-bytes".getBytes());
+
+        DownloadedDocumentFile downloaded = documentService.downloadDocument(studentId, docId);
+
+        assertThat(downloaded.originalFilename()).isEqualTo("quy_che.pdf");
+        assertThat(downloaded.mimeType()).isEqualTo("application/pdf");
+        assertThat(downloaded.content()).isEqualTo("pdf-bytes".getBytes());
+        assertThat(downloaded.allowDownload()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Chặn tải file gốc khi allowDownload = false")
+    void downloadDocument_AllowDownloadFalse_ThrowsForbidden() throws Exception {
+        UUID studentId = UUID.randomUUID();
+        UUID docId = UUID.randomUUID();
+        Account student = new Account("Student", "s@test.edu.vn", "hash", AccountRole.STUDENT, AccountAccessStatus.ACTIVE, false);
+        Document doc = new Document(advisor, "Nội bộ", null, false, "no_dl.pdf", "documents/no_dl.pdf", "application/pdf", 100L, "c".repeat(64));
+        setId(doc, docId);
+        doc.completeRagIndexing();
+
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(student));
+        when(documentRepository.findById(docId)).thenReturn(Optional.of(doc));
+
+        assertThatThrownBy(() -> documentService.downloadDocument(studentId, docId))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+    }
+
+    @Test
+    @DisplayName("Xem trước file gốc vẫn thành công ngay cả khi allowDownload = false")
+    void previewDocument_AllowDownloadFalse_StillReturnsBytesForStudent() throws Exception {
+        UUID studentId = UUID.randomUUID();
+        UUID docId = UUID.randomUUID();
+        Account student = new Account("Student", "s@test.edu.vn", "hash", AccountRole.STUDENT, AccountAccessStatus.ACTIVE, false);
+        Document doc = new Document(advisor, "Nội bộ", null, false, "view_only.pdf", "documents/view_only.pdf", "application/pdf", 100L, "c".repeat(64));
+        setId(doc, docId);
+        doc.completeRagIndexing();
+
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(student));
+        when(documentRepository.findById(docId)).thenReturn(Optional.of(doc));
+        when(documentStorageService.loadBytes("documents/view_only.pdf")).thenReturn("pdf-preview".getBytes());
+
+        DownloadedDocumentFile previewed = documentService.previewDocument(studentId, docId);
+
+        assertThat(previewed.originalFilename()).isEqualTo("view_only.pdf");
+        assertThat(previewed.content()).isEqualTo("pdf-preview".getBytes());
+        assertThat(previewed.allowDownload()).isFalse();
+    }
+
+    private static void setId(Document doc, UUID id) throws Exception {
+        Field field = Document.class.getDeclaredField("id");
+        field.setAccessible(true);
+        field.set(doc, id);
     }
 }

@@ -1,8 +1,13 @@
 package vn.hcmute.edu.sia.controller;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.UUID;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -10,12 +15,13 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
-import jakarta.validation.Valid;
+import vn.hcmute.edu.sia.dto.internal.DownloadedDocumentFile;
 import vn.hcmute.edu.sia.dto.request.UploadDocumentRequest;
+import vn.hcmute.edu.sia.dto.response.DocumentContentResponse;
 import vn.hcmute.edu.sia.dto.response.DocumentResponse;
 import vn.hcmute.edu.sia.dto.response.DocumentUploadResponse;
 import vn.hcmute.edu.sia.security.AccountPrincipal;
@@ -47,5 +53,65 @@ public class DocumentController {
     public ResponseEntity<List<DocumentResponse>> getDocuments() {
         List<DocumentResponse> response = documentService.getDocuments();
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/{documentId}/content")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<DocumentContentResponse> getDocumentContent(
+            @AuthenticationPrincipal AccountPrincipal principal,
+            @PathVariable UUID documentId
+    ) {
+        DocumentContentResponse response = documentService.getDocumentContent(
+                principal.getAccountId(),
+                documentId
+        );
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/{documentId}/preview")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<byte[]> previewDocument(
+            @AuthenticationPrincipal AccountPrincipal principal,
+            @PathVariable UUID documentId
+    ) {
+        DownloadedDocumentFile file = documentService.previewDocument(
+                principal.getAccountId(),
+                documentId
+        );
+        return buildFileResponse(
+                file,
+                ContentDisposition.inline()
+                        .filename(file.originalFilename(), StandardCharsets.UTF_8)
+                        .build()
+        );
+    }
+
+    @GetMapping("/{documentId}/download")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<byte[]> downloadDocument(
+            @AuthenticationPrincipal AccountPrincipal principal,
+            @PathVariable UUID documentId
+    ) {
+        DownloadedDocumentFile file = documentService.downloadDocument(
+                principal.getAccountId(),
+                documentId
+        );
+        return buildFileResponse(
+                file,
+                ContentDisposition.attachment()
+                        .filename(file.originalFilename(), StandardCharsets.UTF_8)
+                        .build()
+        );
+    }
+
+    private ResponseEntity<byte[]> buildFileResponse(
+            DownloadedDocumentFile file,
+            ContentDisposition disposition
+    ) {
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(file.mimeType()))
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .header("X-Allow-Download", String.valueOf(file.allowDownload()))
+                .body(file.content());
     }
 }

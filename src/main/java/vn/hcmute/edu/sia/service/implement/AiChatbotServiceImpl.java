@@ -114,9 +114,12 @@ public class AiChatbotServiceImpl implements AiChatbotService {
                         PageRequest.of(page, size)
                 );
 
+        List<ChatMessage> rawMessages = slice.getContent();
+        Map<UUID, Document> documentsById = loadDocumentsForMessages(rawMessages);
+
         List<AiMessageResponse> messages = new ArrayList<>(
-                slice.getContent().stream()
-                        .map(this::toMessageResponse)
+                rawMessages.stream()
+                        .map(msg -> toMessageResponse(msg, documentsById))
                         .toList()
         );
         Collections.reverse(messages);
@@ -158,7 +161,8 @@ public class AiChatbotServiceImpl implements AiChatbotService {
                 new AiServiceChatRequest(question, topK, filenameFilter)
         );
 
-        List<Citation> citations = mapCitations(aiResponse.sources());
+        Map<UUID, Document> documentsById = new HashMap<>();
+        List<Citation> citations = mapCitations(aiResponse.sources(), documentsById);
         AIMessage aiMessage = new AIMessage(
                 conversation.getId(),
                 aiResponse.answer(),
@@ -184,8 +188,8 @@ public class AiChatbotServiceImpl implements AiChatbotService {
         return new AiChatbotTurnResponse(
                 conversation.getId(),
                 conversation.getTitle(),
-                toMessageResponse(studentMessage),
-                toMessageResponse(aiMessage)
+                toMessageResponse(studentMessage, documentsById),
+                toMessageResponse(aiMessage, documentsById)
         );
     }
 
@@ -236,22 +240,39 @@ public class AiChatbotServiceImpl implements AiChatbotService {
                 ));
     }
 
-    private List<Citation> mapCitations(List<AiServiceSourceCitation> sources) {
+    private List<Citation> mapCitations(
+            List<AiServiceSourceCitation> sources,
+            Map<UUID, Document> documentsById
+    ) {
         if (sources == null || sources.isEmpty()) {
             return List.of();
         }
 
-        Set<String> filenames = sources.stream()
+        Set<UUID> directDocumentIds = sources.stream()
                 .filter(Objects::nonNull)
+                .map(source -> parseUuidOrNull(source.documentId()))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        if (!directDocumentIds.isEmpty()) {
+            for (Document doc : documentRepository.findAllById(directDocumentIds)) {
+                documentsById.put(doc.getId(), doc);
+            }
+        }
+
+        Set<String> fallbackFilenames = sources.stream()
+                .filter(Objects::nonNull)
+                .filter(source -> parseUuidOrNull(source.documentId()) == null)
                 .map(AiServiceSourceCitation::filename)
                 .filter(name -> name != null && !name.isBlank())
                 .map(String::strip)
                 .collect(Collectors.toSet());
 
-        Map<String, UUID> documentIdByFilename = new HashMap<>();
-        if (!filenames.isEmpty()) {
-            for (Document doc : documentRepository.findByOriginalFilenameIn(filenames)) {
-                documentIdByFilename.putIfAbsent(doc.getOriginalFilename(), doc.getId());
+        Map<String, Document> documentByFilename = new HashMap<>();
+        if (!fallbackFilenames.isEmpty()) {
+            for (Document doc : documentRepository.findByOriginalFilenameIn(fallbackFilenames)) {
+                documentByFilename.putIfAbsent(doc.getOriginalFilename(), doc);
+                documentsById.putIfAbsent(doc.getId(), doc);
             }
         }
 
@@ -261,21 +282,71 @@ public class AiChatbotServiceImpl implements AiChatbotService {
                 continue;
             }
             String filename = source.filename().strip();
+            UUID resolvedDocumentId = parseUuidOrNull(source.documentId());
+            Document matchedDocument = resolvedDocumentId != null
+                    ? documentsById.get(resolvedDocumentId)
+                    : documentByFilename.get(filename);
+
+            if (resolvedDocumentId == null && matchedDocument != null) {
+                resolvedDocumentId = matchedDocument.getId();
+            }
+
+            String displayTitle = matchedDocument != null
+                    && matchedDocument.getTitle() != null
+                    && !matchedDocument.getTitle().isBlank()
+                    ? matchedDocument.getTitle()
+                    : filename;
+
             Integer pageNumber = source.pageNumber() != null && source.pageNumber() > 0
                     ? source.pageNumber()
                     : null;
 
+            String quotedContent = source.content() != null && !source.content().isBlank()
+                    ? source.content()
+                    : source.snippet();
+
             citations.add(new Citation(
-                    documentIdByFilename.get(filename),
-                    filename,
+                    resolvedDocumentId,
+                    displayTitle,
                     pageNumber,
                     "chunk_" + source.chunkIndex(),
-                    source.snippet(),
-                    source.score()
+                    quotedContent,
+                    source.score(),
+                    source.charStart(),
+                    source.charEnd()
             ));
         }
 
         return citations;
+    }
+
+    private Map<UUID, Document> loadDocumentsForMessages(List<ChatMessage> messages) {
+        Set<UUID> documentIds = messages.stream()
+                .filter(AIMessage.class::isInstance)
+                .map(AIMessage.class::cast)
+                .flatMap(aiMessage -> aiMessage.getCitations().stream())
+                .map(citation -> parseUuidOrNull(citation.getDocumentId()))
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        Map<UUID, Document> documentsById = new HashMap<>();
+        if (!documentIds.isEmpty()) {
+            for (Document doc : documentRepository.findAllById(documentIds)) {
+                documentsById.put(doc.getId(), doc);
+            }
+        }
+        return documentsById;
+    }
+
+    private UUID parseUuidOrNull(String rawUuid) {
+        if (rawUuid == null || rawUuid.isBlank()) {
+            return null;
+        }
+        try {
+            return UUID.fromString(rawUuid.strip());
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     private AiConversationResponse toConversationResponse(AIConversation conversation) {
@@ -299,10 +370,13 @@ public class AiChatbotServiceImpl implements AiChatbotService {
         );
     }
 
-    private AiMessageResponse toMessageResponse(ChatMessage message) {
+    private AiMessageResponse toMessageResponse(
+            ChatMessage message,
+            Map<UUID, Document> documentsById
+    ) {
         List<AiCitationResponse> citations = switch (message) {
             case AIMessage aiMessage -> aiMessage.getCitations().stream()
-                    .map(this::toCitationResponse)
+                    .map(citation -> toCitationResponse(citation, documentsById))
                     .toList();
             case UserMessage ignored -> List.of();
             default -> List.of();
@@ -317,22 +391,32 @@ public class AiChatbotServiceImpl implements AiChatbotService {
         );
     }
 
-    private AiCitationResponse toCitationResponse(Citation citation) {
-        UUID documentId = null;
-        if (citation.getDocumentId() != null) {
-            try {
-                documentId = UUID.fromString(citation.getDocumentId());
-            } catch (IllegalArgumentException ignored) {
-            }
-        }
+    private AiCitationResponse toCitationResponse(
+            Citation citation,
+            Map<UUID, Document> documentsById
+    ) {
+        UUID documentId = parseUuidOrNull(citation.getDocumentId());
+        Document matchedDocument = documentId != null ? documentsById.get(documentId) : null;
+
+        String sourceTitle = matchedDocument != null
+                && matchedDocument.getTitle() != null
+                && !matchedDocument.getTitle().isBlank()
+                ? matchedDocument.getTitle()
+                : citation.getSourceTitle();
+        String originalFilename = matchedDocument != null
+                ? matchedDocument.getOriginalFilename()
+                : citation.getSourceTitle();
 
         return new AiCitationResponse(
                 documentId,
-                citation.getSourceTitle(),
+                sourceTitle,
                 citation.getPageNumber(),
                 citation.getChunkReference(),
                 citation.getQuotedContent(),
-                citation.getRelevanceScore()
+                citation.getRelevanceScore(),
+                citation.getCharStart(),
+                citation.getCharEnd(),
+                originalFilename
         );
     }
 

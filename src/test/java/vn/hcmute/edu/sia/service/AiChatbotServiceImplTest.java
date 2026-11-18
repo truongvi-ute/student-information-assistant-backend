@@ -186,6 +186,7 @@ class AiChatbotServiceImplTest {
         assertThat(savedAiMsg.getSenderType()).isEqualTo(MessageSenderType.AI);
         assertThat(savedAiMsg.getCitations()).hasSize(1);
         assertThat(savedAiMsg.getCitations().getFirst().getDocumentId()).isEqualTo(documentId.toString());
+        assertThat(savedAiMsg.getCitations().getFirst().getSourceTitle()).isEqualTo("Quy chế học vụ 2026");
         assertThat(savedAiMsg.getCitations().getFirst().getChunkReference()).isEqualTo("chunk_4");
 
         assertThat(turn.title()).isEqualTo("Điều kiện nhận học bổng KKHT là gì?");
@@ -193,6 +194,8 @@ class AiChatbotServiceImplTest {
         assertThat(turn.aiMessage().senderType()).isEqualTo(MessageSenderType.AI);
         assertThat(turn.aiMessage().citations()).hasSize(1);
         assertThat(turn.aiMessage().citations().getFirst().documentId()).isEqualTo(documentId);
+        assertThat(turn.aiMessage().citations().getFirst().sourceTitle()).isEqualTo("Quy chế học vụ 2026");
+        assertThat(turn.aiMessage().citations().getFirst().originalFilename()).isEqualTo("quy_che_2026.pdf");
 
         verify(mongoTemplate).updateFirst(any(Query.class), any(Update.class), eq(AIConversation.class));
     }
@@ -241,6 +244,76 @@ class AiChatbotServiceImplTest {
         assertThat(history.messages().get(0).citations()).isEmpty();
         assertThat(history.messages().get(1).senderType()).isEqualTo(MessageSenderType.AI);
         assertThat(history.messages().get(1).citations()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("Ưu tiên documentId trực tiếp từ AI-Service và lưu charStart/charEnd cùng full content")
+    @SuppressWarnings("unchecked")
+    void askQuestion_WithDirectDocumentIdAndOffsets_SkipsFilenameLookupAndSavesFullContent() throws Exception {
+        AIConversation conversation = new AIConversation(studentId, "Học bổng", null);
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(activeStudent));
+        when(conversationRepository.findByIdAndStudentIdAndConversationTypeAndDeletedAtIsNull(
+                conversation.getId(), studentId.toString(), "AI"
+        )).thenReturn(Optional.of(conversation));
+
+        Document doc = new Document(
+                activeAdvisor,
+                "Chương trình đào tạo CNTT 2026",
+                null,
+                true,
+                "ab0dca45_CTDT-CNTT.pdf",
+                "documents/ab0dca45_CTDT-CNTT.pdf",
+                "application/pdf",
+                2048L,
+                "b".repeat(64)
+        );
+        setField(doc, "id", documentId);
+        when(documentRepository.findAllById(anyCollection())).thenReturn(List.of(doc));
+
+        String fullChunkText = "Điều 5. Sinh viên đạt GPA từ 3.2 trở lên và điểm rèn luyện từ 80 trở lên sẽ được xét học bổng.";
+        AiServiceSourceCitation sourceCitation = new AiServiceSourceCitation(
+                documentId.toString(),
+                "ab0dca45_CTDT-CNTT.pdf",
+                3,
+                2,
+                140,
+                234,
+                0.93,
+                "Điều 5. Sinh viên đạt GPA...",
+                fullChunkText
+        );
+        AiServiceChatResponse aiResponse = new AiServiceChatResponse(
+                "Điều kiện học bổng?",
+                "Cần GPA >= 3.2 và ĐRL >= 80.",
+                List.of(sourceCitation)
+        );
+        when(aiServiceClient.chat(any(AiServiceChatRequest.class))).thenReturn(aiResponse);
+
+        AiChatbotTurnResponse turn = aiChatbotService.askQuestion(
+                studentId,
+                conversation.getId(),
+                new SendAiMessageRequest("Điều kiện học bổng?", 5, null)
+        );
+
+        verify(documentRepository, never()).findByOriginalFilenameIn(anyCollection());
+        ArgumentCaptor<List<ChatMessage>> savedCaptor = ArgumentCaptor.forClass(List.class);
+        verify(messageRepository).saveAll(savedCaptor.capture());
+
+        AIMessage savedAiMsg = (AIMessage) savedCaptor.getValue().get(1);
+        Citation savedCitation = savedAiMsg.getCitations().getFirst();
+        assertThat(savedCitation.getDocumentId()).isEqualTo(documentId.toString());
+        assertThat(savedCitation.getSourceTitle()).isEqualTo("Chương trình đào tạo CNTT 2026");
+        assertThat(savedCitation.getQuotedContent()).isEqualTo(fullChunkText);
+        assertThat(savedCitation.getCharStart()).isEqualTo(140);
+        assertThat(savedCitation.getCharEnd()).isEqualTo(234);
+
+        var citationDto = turn.aiMessage().citations().getFirst();
+        assertThat(citationDto.documentId()).isEqualTo(documentId);
+        assertThat(citationDto.sourceTitle()).isEqualTo("Chương trình đào tạo CNTT 2026");
+        assertThat(citationDto.originalFilename()).isEqualTo("ab0dca45_CTDT-CNTT.pdf");
+        assertThat(citationDto.quotedContent()).isEqualTo(fullChunkText);
+        assertThat(citationDto.charStart()).isEqualTo(140);
+        assertThat(citationDto.charEnd()).isEqualTo(234);
     }
 
     private static void setField(Object target, String fieldName, Object value) throws Exception {

@@ -9,9 +9,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
-
+import vn.hcmute.edu.sia.dto.internal.DownloadedDocumentFile;
 import vn.hcmute.edu.sia.dto.internal.StoredDocumentFile;
 import vn.hcmute.edu.sia.dto.request.UploadDocumentRequest;
+import vn.hcmute.edu.sia.dto.response.DocumentContentResponse;
 import vn.hcmute.edu.sia.dto.response.DocumentResponse;
 import vn.hcmute.edu.sia.dto.response.DocumentUploadResponse;
 import vn.hcmute.edu.sia.entity.Account;
@@ -40,14 +41,9 @@ public class DocumentServiceImpl implements DocumentService {
             UUID uploaderId,
             UploadDocumentRequest request
     ) {
-        Account uploader = accountRepository.findById(uploaderId)
-                .orElseThrow(() -> new ResponseStatusException(
-                        HttpStatus.UNAUTHORIZED,
-                        "Account was not found"
-                ));
+        Account uploader = requireActiveAccount(uploaderId);
 
-        if (uploader.getRole() != AccountRole.ADVISOR
-                || uploader.getAccessStatus() != AccountAccessStatus.ACTIVE) {
+        if (uploader.getRole() != AccountRole.ADVISOR) {
             throw new ResponseStatusException(
                     HttpStatus.FORBIDDEN,
                     "An active advisor account is required to upload documents"
@@ -98,6 +94,117 @@ public class DocumentServiceImpl implements DocumentService {
                 .stream()
                 .map(DocumentResponse::from)
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public DocumentContentResponse getDocumentContent(UUID requesterId, UUID documentId) {
+        Account requester = requireActiveAccount(requesterId);
+        Document document = requireDocument(documentId);
+
+        if (requester.getRole() == AccountRole.STUDENT && !document.isEligibleForRag()) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "This document is not available for students"
+            );
+        }
+
+        String extractedKey = "extracted/" + document.getId() + ".md";
+        String markdownContent;
+        try {
+            markdownContent = documentStorageService.loadUtf8Text(extractedKey);
+        } catch (IOException exception) {
+            throw new DocumentStorageException(
+                    "Could not read extracted document content from RustFS",
+                    exception
+            );
+        }
+
+        return new DocumentContentResponse(
+                document.getId(),
+                document.getTitle(),
+                document.getOriginalFilename(),
+                document.getMimeType(),
+                document.isDownloadable(),
+                markdownContent
+        );
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public DownloadedDocumentFile previewDocument(UUID requesterId, UUID documentId) {
+        return loadOriginalDocument(requesterId, documentId, false);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public DownloadedDocumentFile downloadDocument(UUID requesterId, UUID documentId) {
+        return loadOriginalDocument(requesterId, documentId, true);
+    }
+
+    private DownloadedDocumentFile loadOriginalDocument(
+            UUID requesterId,
+            UUID documentId,
+            boolean requireDownloadable
+    ) {
+        Account requester = requireActiveAccount(requesterId);
+        Document document = requireDocument(documentId);
+
+        if (requester.getRole() == AccountRole.STUDENT && !document.isEligibleForRag()) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "This document is not available for students"
+            );
+        }
+
+        if (requireDownloadable && !document.isDownloadable()) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "This document is not available for download"
+            );
+        }
+
+        byte[] content;
+        try {
+            content = documentStorageService.loadBytes(document.getStoragePath());
+        } catch (IOException exception) {
+            throw new DocumentStorageException(
+                    "Could not load the document from RustFS",
+                    exception
+            );
+        }
+
+        return new DownloadedDocumentFile(
+                document.getOriginalFilename(),
+                document.getMimeType(),
+                content,
+                document.isDownloadable()
+        );
+    }
+
+    private Account requireActiveAccount(UUID accountId) {
+        Account account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.UNAUTHORIZED,
+                        "Account was not found"
+                ));
+
+        if (account.getAccessStatus() != AccountAccessStatus.ACTIVE) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Account is not active"
+            );
+        }
+
+        return account;
+    }
+
+    private Document requireDocument(UUID documentId) {
+        return documentRepository.findById(documentId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Document was not found"
+                ));
     }
 
     private void deleteStoredFileAfterFailure(
