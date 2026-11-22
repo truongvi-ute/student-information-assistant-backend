@@ -1,5 +1,6 @@
 package vn.hcmute.edu.sia.service;
 
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -10,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
+import vn.hcmute.edu.sia.dto.internal.AiServiceChatHistoryMessage;
 import vn.hcmute.edu.sia.dto.internal.AiServiceChatRequest;
 import vn.hcmute.edu.sia.dto.internal.AiServiceChatResponse;
 import vn.hcmute.edu.sia.dto.internal.AiServiceIngestRequest;
@@ -66,6 +68,8 @@ class AiServiceClientTest {
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.question").value("Điều kiện tốt nghiệp là gì?"))
                 .andExpect(jsonPath("$.top_k").value(5))
+                .andExpect(jsonPath("$.history").isArray())
+                .andExpect(jsonPath("$.history.length()").value(0))
                 .andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON));
 
         AiServiceChatResponse response = aiServiceClient.chat(
@@ -83,6 +87,43 @@ class AiServiceClientTest {
         assertThat(response.sources().getFirst().charEnd()).isEqualTo(260);
         assertThat(response.sources().getFirst().content()).isEqualTo("Điều 14: Điều kiện xét tốt nghiệp đại học chính quy.");
         assertThat(response.sources().getFirst().score()).isEqualTo(0.912);
+    }
+
+    @Test
+    @DisplayName("Gửi kèm mảng history (role, content) trong POST /v1/chat")
+    void chat_WithHistory_SerializesHistoryRolesAndContents() {
+        String responseJson = """
+                {
+                  "question": "Còn chuẩn đầu ra của ngành đó?",
+                  "answer": "Chuẩn đầu ra ngành Kỹ thuật dữ liệu gồm chuẩn ngoại ngữ và tin học.",
+                  "sources": []
+                }
+                """;
+
+        mockServer.expect(requestTo("http://localhost:8000/v1/chat"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.question").value("Còn chuẩn đầu ra của ngành đó?"))
+                .andExpect(jsonPath("$.top_k").value(5))
+                .andExpect(jsonPath("$.history.length()").value(2))
+                .andExpect(jsonPath("$.history[0].role").value("user"))
+                .andExpect(jsonPath("$.history[0].content").value("Ngành Kỹ thuật dữ liệu học mấy năm?"))
+                .andExpect(jsonPath("$.history[1].role").value("assistant"))
+                .andExpect(jsonPath("$.history[1].content").value("Ngành Kỹ thuật dữ liệu đào tạo 4 năm."))
+                .andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON));
+
+        AiServiceChatResponse response = aiServiceClient.chat(new AiServiceChatRequest(
+                "Còn chuẩn đầu ra của ngành đó?",
+                5,
+                null,
+                List.of(
+                        new AiServiceChatHistoryMessage("user", "Ngành Kỹ thuật dữ liệu học mấy năm?"),
+                        new AiServiceChatHistoryMessage("assistant", "Ngành Kỹ thuật dữ liệu đào tạo 4 năm.")
+                )
+        ));
+
+        mockServer.verify();
+        assertThat(response.answer()).contains("Chuẩn đầu ra");
     }
 
     @Test

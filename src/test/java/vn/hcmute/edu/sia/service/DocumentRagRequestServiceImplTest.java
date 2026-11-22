@@ -191,6 +191,7 @@ class DocumentRagRequestServiceImplTest {
         when(document.getStoragePath()).thenReturn("documents/" + documentId + ".pdf");
         when(document.getOriginalFilename()).thenReturn("quy_che.pdf");
         when(document.getTitle()).thenReturn("Quy chế");
+        when(document.getDescription()).thenReturn("Quy chế học vụ trình độ đại học 2026");
         when(aiServiceClient.ingestFromStorage(any(AiServiceIngestRequest.class)))
                 .thenReturn(new AiServiceIngestResponse("processing", documentId.toString(), "Accepted"));
 
@@ -201,8 +202,35 @@ class DocumentRagRequestServiceImplTest {
         assertThat(request.getStatus()).isEqualTo(DocumentRequestStatus.APPROVED);
         assertThat(request.getReviewedByAdmin()).isSameAs(admin);
         verify(document).startRagProcessing();
-        verify(aiServiceClient).ingestFromStorage(any(AiServiceIngestRequest.class));
+
+        ArgumentCaptor<AiServiceIngestRequest> ingestCaptor = ArgumentCaptor.forClass(AiServiceIngestRequest.class);
+        verify(aiServiceClient).ingestFromStorage(ingestCaptor.capture());
+        assertThat(ingestCaptor.getValue().metadata())
+                .containsEntry("title", "Quy chế")
+                .containsEntry("description", "Quy chế học vụ trình độ đại học 2026");
         verify(documentRagStatusService, never()).markFailed(any());
+    }
+
+    @Test
+    void adminApprovesPendingRequestOmitsBlankDescriptionFromMetadata() {
+        prepareAdmin();
+        when(document.getId()).thenReturn(documentId);
+        when(document.getStoragePath()).thenReturn("documents/" + documentId + ".pdf");
+        when(document.getOriginalFilename()).thenReturn("quy_che.pdf");
+        when(document.getTitle()).thenReturn("Quy chế");
+        when(document.getDescription()).thenReturn("   ");
+        when(aiServiceClient.ingestFromStorage(any(AiServiceIngestRequest.class)))
+                .thenReturn(new AiServiceIngestResponse("processing", documentId.toString(), "Accepted"));
+
+        DocumentRagRequest request = new DocumentRagRequest(document, advisor);
+        when(requestRepository.findByIdForUpdate(requestId)).thenReturn(Optional.of(request));
+        service.approveRequest(adminId, requestId);
+
+        ArgumentCaptor<AiServiceIngestRequest> ingestCaptor = ArgumentCaptor.forClass(AiServiceIngestRequest.class);
+        verify(aiServiceClient).ingestFromStorage(ingestCaptor.capture());
+        assertThat(ingestCaptor.getValue().metadata())
+                .containsOnlyKeys("title")
+                .containsEntry("title", "Quy chế");
     }
 
     @Test
