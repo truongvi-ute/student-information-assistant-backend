@@ -19,6 +19,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+import vn.hcmute.edu.sia.dto.internal.AiServiceChatHistoryMessage;
 import vn.hcmute.edu.sia.dto.internal.AiServiceChatRequest;
 import vn.hcmute.edu.sia.dto.internal.AiServiceChatResponse;
 import vn.hcmute.edu.sia.dto.internal.AiServiceSourceCitation;
@@ -38,6 +39,7 @@ import vn.hcmute.edu.sia.entity.Document;
 import vn.hcmute.edu.sia.entity.UserMessage;
 import vn.hcmute.edu.sia.enums.AccountAccessStatus;
 import vn.hcmute.edu.sia.enums.AccountRole;
+import vn.hcmute.edu.sia.enums.MessageSenderType;
 import vn.hcmute.edu.sia.repository.AccountRepository;
 import vn.hcmute.edu.sia.repository.ChatConversationRepository;
 import vn.hcmute.edu.sia.repository.ChatMessageRepository;
@@ -51,6 +53,7 @@ public class AiChatbotServiceImpl implements AiChatbotService {
 
     private static final String AI_CONVERSATION_TYPE = "AI";
     private static final int DEFAULT_TOP_K = 5;
+    private static final int MAX_HISTORY_MESSAGES = 6;
     private static final int MAX_AUTO_TITLE_LENGTH = 60;
     private static final int MAX_PREVIEW_MESSAGE_LENGTH = 120;
 
@@ -150,6 +153,8 @@ public class AiChatbotServiceImpl implements AiChatbotService {
                 ? request.filenameFilter().strip()
                 : null;
 
+        List<AiServiceChatHistoryMessage> recentHistory = loadRecentHistory(conversation.getId());
+
         UserMessage studentMessage = new UserMessage(
                 conversation.getId(),
                 studentId,
@@ -158,7 +163,7 @@ public class AiChatbotServiceImpl implements AiChatbotService {
         );
 
         AiServiceChatResponse aiResponse = aiServiceClient.chat(
-                new AiServiceChatRequest(question, topK, filenameFilter)
+                new AiServiceChatRequest(question, topK, filenameFilter, recentHistory)
         );
 
         Map<UUID, Document> documentsById = new HashMap<>();
@@ -238,6 +243,46 @@ public class AiChatbotServiceImpl implements AiChatbotService {
                         HttpStatus.NOT_FOUND,
                         "AI conversation not found"
                 ));
+    }
+
+    private List<AiServiceChatHistoryMessage> loadRecentHistory(String conversationId) {
+        Slice<ChatMessage> recentSlice = messageRepository
+                .findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(
+                        conversationId,
+                        PageRequest.of(0, MAX_HISTORY_MESSAGES)
+                );
+
+        if (recentSlice == null || recentSlice.isEmpty()) {
+            return List.of();
+        }
+
+        List<ChatMessage> chronological = new ArrayList<>(recentSlice.getContent());
+        Collections.reverse(chronological);
+
+        List<AiServiceChatHistoryMessage> history = new ArrayList<>(chronological.size());
+        for (ChatMessage message : chronological) {
+            if (message == null || message.getContent() == null || message.getContent().isBlank()) {
+                continue;
+            }
+            String role = mapHistoryRole(message.getSenderType());
+            if (role == null) {
+                continue;
+            }
+            history.add(new AiServiceChatHistoryMessage(role, message.getContent().strip()));
+        }
+
+        return history;
+    }
+
+    private String mapHistoryRole(MessageSenderType senderType) {
+        if (senderType == null) {
+            return null;
+        }
+        return switch (senderType) {
+            case STUDENT -> "user";
+            case AI -> "assistant";
+            case ADVISOR -> null;
+        };
     }
 
     private List<Citation> mapCitations(
