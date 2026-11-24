@@ -1,5 +1,6 @@
 package vn.hcmute.edu.sia.service.implement;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -124,7 +125,8 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
                     document.getId(),
                     document.getStoragePath(),
                     document.getOriginalFilename(),
-                    document.getTitle()
+                    document.getTitle(),
+                    document.getDescription()
             );
         }
     }
@@ -149,25 +151,27 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
             UUID documentId,
             String storagePath,
             String originalFilename,
-            String title
+            String title,
+            String description
     ) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    triggerStorageIngestion(documentId, storagePath, originalFilename, title);
+                    triggerStorageIngestion(documentId, storagePath, originalFilename, title, description);
                 }
             });
             return;
         }
-        triggerStorageIngestion(documentId, storagePath, originalFilename, title);
+        triggerStorageIngestion(documentId, storagePath, originalFilename, title, description);
     }
 
     private void triggerStorageIngestion(
             UUID documentId,
             String storagePath,
             String originalFilename,
-            String title
+            String title,
+            String description
     ) {
         if (aiServiceClient == null || documentId == null) {
             return;
@@ -177,9 +181,13 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
                 ? callbackBaseUrl.replaceAll("/+$", "")
                 : "http://localhost:8080";
         String callbackUrl = normalizedBaseUrl + "/api/internal/documents/" + documentId + "/rag-status";
-        Map<String, Object> metadata = title != null && !title.isBlank()
-                ? Map.of("title", title)
-                : Map.of();
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        if (title != null && !title.isBlank()) {
+            metadata.put("title", title.strip());
+        }
+        if (description != null && !description.isBlank()) {
+            metadata.put("description", description.strip());
+        }
 
         try {
             aiServiceClient.ingestFromStorage(new AiServiceIngestRequest(

@@ -12,6 +12,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.SliceImpl;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -19,6 +20,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
+import vn.hcmute.edu.sia.dto.internal.AiServiceChatHistoryMessage;
 import vn.hcmute.edu.sia.dto.internal.AiServiceChatRequest;
 import vn.hcmute.edu.sia.dto.internal.AiServiceChatResponse;
 import vn.hcmute.edu.sia.dto.internal.AiServiceSourceCitation;
@@ -314,6 +316,72 @@ class AiChatbotServiceImplTest {
         assertThat(citationDto.quotedContent()).isEqualTo(fullChunkText);
         assertThat(citationDto.charStart()).isEqualTo(140);
         assertThat(citationDto.charEnd()).isEqualTo(234);
+    }
+
+    @Test
+    @DisplayName("Truy vấn tối đa 6 tin nhắn gần nhất từ MongoDB và gửi theo chiều cũ trước mới sau")
+    void askQuestion_WithRecentHistory_ForwardsChronologicalHistoryToAiService() {
+        AIConversation conversation = new AIConversation(studentId, "Kỹ thuật dữ liệu", null);
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(activeStudent));
+        when(conversationRepository.findByIdAndStudentIdAndConversationTypeAndDeletedAtIsNull(
+                conversation.getId(), studentId.toString(), "AI"
+        )).thenReturn(Optional.of(conversation));
+
+        UserMessage userMsg1 = new UserMessage(
+                conversation.getId(),
+                studentId,
+                AccountRole.STUDENT,
+                "Ngành Kỹ thuật dữ liệu học bao nhiêu tín chỉ?"
+        );
+        AIMessage aiMsg1 = new AIMessage(
+                conversation.getId(),
+                "Chương trình đào tạo ngành Kỹ thuật dữ liệu có tổng cộng 150 tín chỉ.",
+                List.of()
+        );
+        UserMessage userMsg2 = new UserMessage(
+                conversation.getId(),
+                studentId,
+                AccountRole.STUDENT,
+                "Thời gian đào tạo mấy năm?"
+        );
+        AIMessage aiMsg2 = new AIMessage(
+                conversation.getId(),
+                "Thời gian đào tạo chuẩn là 4 năm.",
+                List.of()
+        );
+
+        when(messageRepository.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(
+                eq(conversation.getId()), eq(PageRequest.of(0, 6))
+        )).thenReturn(new SliceImpl<>(
+                List.of(aiMsg2, userMsg2, aiMsg1, userMsg1),
+                PageRequest.of(0, 6),
+                false
+        ));
+
+        AiServiceChatResponse aiResponse = new AiServiceChatResponse(
+                "Còn chuẩn đầu ra của ngành đó?",
+                "Chuẩn đầu ra ngành Kỹ thuật dữ liệu gồm kiến thức chuyên môn và ngoại ngữ.",
+                List.of()
+        );
+        when(aiServiceClient.chat(any(AiServiceChatRequest.class))).thenReturn(aiResponse);
+
+        aiChatbotService.askQuestion(
+                studentId,
+                conversation.getId(),
+                new SendAiMessageRequest("Còn chuẩn đầu ra của ngành đó?", 5, null)
+        );
+
+        ArgumentCaptor<AiServiceChatRequest> requestCaptor = ArgumentCaptor.forClass(AiServiceChatRequest.class);
+        verify(aiServiceClient).chat(requestCaptor.capture());
+
+        AiServiceChatRequest sentRequest = requestCaptor.getValue();
+        assertThat(sentRequest.question()).isEqualTo("Còn chuẩn đầu ra của ngành đó?");
+        assertThat(sentRequest.history()).containsExactly(
+                new AiServiceChatHistoryMessage("user", userMsg1.getContent()),
+                new AiServiceChatHistoryMessage("assistant", aiMsg1.getContent()),
+                new AiServiceChatHistoryMessage("user", userMsg2.getContent()),
+                new AiServiceChatHistoryMessage("assistant", aiMsg2.getContent())
+        );
     }
 
     private static void setField(Object target, String fieldName, Object value) throws Exception {

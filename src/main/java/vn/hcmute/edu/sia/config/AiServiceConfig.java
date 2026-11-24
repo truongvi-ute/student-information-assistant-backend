@@ -14,7 +14,7 @@ public class AiServiceConfig {
     public RestClient aiServiceRestClient(
             @Value("${app.ai-service.base-url:http://localhost:8000}") String baseUrl,
             @Value("${app.ai-service.connect-timeout-ms:5000}") long connectTimeoutMs,
-            @Value("${app.ai-service.read-timeout-ms:60000}") long readTimeoutMs
+            @Value("${app.ai-service.read-timeout-ms:90000}") long readTimeoutMs
     ) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofMillis(connectTimeoutMs));
