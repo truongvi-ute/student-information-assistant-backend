@@ -1,6 +1,12 @@
 package vn.hcmute.edu.sia.service.implement;
 
 import java.util.LinkedHashMap;
+import java.io.IOException;
+import vn.hcmute.edu.sia.dto.internal.DownloadedDocumentFile;
+import vn.hcmute.edu.sia.enums.DocumentLifecycleStatus;
+import vn.hcmute.edu.sia.enums.RagStatus;
+import vn.hcmute.edu.sia.exception.DocumentStorageException;
+import vn.hcmute.edu.sia.service.DocumentStorageService;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -40,6 +46,7 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
     private final AccountRepository accountRepository;
     private final DocumentRepository documentRepository;
     private final DocumentRagRequestRepository requestRepository;
+    private final DocumentStorageService documentStorageService;
     private final AiServiceClient aiServiceClient;
     private final DocumentRagStatusService documentRagStatusService;
 
@@ -61,6 +68,11 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
 
         if (!document.getUploadedBy().getId().equals(advisorId)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You can only submit requests for your own documents");
+        }
+
+        requireAddEligibleDocument(document);
+        if (requestRepository.existsByDocumentAndStatus(document, DocumentRequestStatus.PENDING)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This document already has a pending request");
         }
 
         DocumentRagRequest request = new DocumentRagRequest(document, advisor);
@@ -116,10 +128,14 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
         DocumentRagRequest request = requestRepository.findByIdForUpdate(requestId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document request was not found"));
 
+        requirePendingAddRequest(request);
+        Document lockedDocument = documentRepository.findByIdForUpdate(request.getDocument().getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document was not found"));
+        requireAddEligibleDocument(lockedDocument);
         request.approve(admin);
 
         if (request.getRequestType() == DocumentRequestType.ADD) {
-            Document document = request.getDocument();
+            Document document = lockedDocument;
             document.startRagProcessing();
             scheduleStorageIngestion(
                     document.getId(),
@@ -145,6 +161,47 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document request was not found"));
 
         request.reject(admin, reason);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public DownloadedDocumentFile getReviewFile(UUID adminId, UUID requestId) {
+        Account admin = accountRepository.findById(adminId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account was not found"));
+        if (admin.getRole() != AccountRole.ADMIN || admin.getAccessStatus() != AccountAccessStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "An active admin account is required");
+        }
+
+        DocumentRagRequest request = requestRepository.findById(requestId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document request was not found"));
+        requirePendingAddRequest(request);
+        Document document = request.getDocument();
+        requireAddEligibleDocument(document);
+
+        try {
+            return new DownloadedDocumentFile(
+                    document.getOriginalFilename(),
+                    document.getMimeType(),
+                    documentStorageService.loadBytes(document.getStoragePath()),
+                    document.isAllowDownload()
+            );
+        } catch (IOException exception) {
+            throw new DocumentStorageException("Could not load document for review from RustFS", exception);
+        }
+    }
+
+    private void requirePendingAddRequest(DocumentRagRequest request) {
+        if (request.getStatus() != DocumentRequestStatus.PENDING
+                || request.getRequestType() != DocumentRequestType.ADD) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Only pending ADD requests can be processed");
+        }
+    }
+
+    private void requireAddEligibleDocument(Document document) {
+        if (document.getLifecycleStatus() != DocumentLifecycleStatus.DRAFT
+                || document.getRagStatus() != RagStatus.NOT_INDEXED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Only unprocessed draft documents are eligible for ADD");
+        }
     }
 
     private void scheduleStorageIngestion(
