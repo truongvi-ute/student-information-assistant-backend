@@ -126,6 +126,7 @@ class DocumentServiceImplTest {
         List<DocumentResponse> result = documentService.getDocuments();
 
         assertThat(result).hasSize(1);
+        assertThat(result.getFirst().uploadedById()).isEqualTo(advisor.getId());
         assertThat(result.getFirst().title()).isEqualTo("Tài liệu 1");
     }
 

@@ -1,5 +1,10 @@
 package vn.hcmute.edu.sia.controller;
 
+import java.nio.charset.StandardCharsets;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import vn.hcmute.edu.sia.dto.internal.DownloadedDocumentFile;
 import java.util.UUID;
 import java.util.List;
 import jakarta.validation.Valid;
@@ -52,6 +57,21 @@ public class DocumentRagRequestController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<List<DocumentRagRequestResponse>> getPendingRequests() {
         return ResponseEntity.ok(requestService.getPendingRequests());
+    }
+
+    @GetMapping("/{requestId}/file")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<byte[]> getReviewFile(
+            @AuthenticationPrincipal AccountPrincipal principal,
+            @PathVariable UUID requestId
+    ) {
+        DownloadedDocumentFile file = requestService.getReviewFile(principal.getAccountId(), requestId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(file.mimeType()))
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                        .filename(file.originalFilename(), StandardCharsets.UTF_8).build().toString())
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(file.content());
     }
 
     @PostMapping("/{requestId}/approve")

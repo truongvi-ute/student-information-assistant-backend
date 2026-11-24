@@ -19,6 +19,7 @@ public interface DocumentRagRequestRepository
 
     List<DocumentRagRequest> findByRequestedByAdvisorOrderByCreatedAtDesc(Account advisor);
     List<DocumentRagRequest> findByStatusOrderByCreatedAtDesc(DocumentRequestStatus status);
+    boolean existsByDocumentAndStatus(Document document, DocumentRequestStatus status);
     boolean existsByDocumentAndRequestTypeAndStatusIn(
             Document document,
             DocumentRequestType requestType,
