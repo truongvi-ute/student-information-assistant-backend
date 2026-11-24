@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.bson.Document;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -15,14 +16,22 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.SliceImpl;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.server.ResponseStatusException;
+import vn.hcmute.edu.sia.dto.request.MarkChatReadRequest;
 import vn.hcmute.edu.sia.dto.request.SendChatMessageRequest;
 import vn.hcmute.edu.sia.dto.response.ChatConversationResponse;
 import vn.hcmute.edu.sia.dto.response.ChatHistoryResponse;
 import vn.hcmute.edu.sia.dto.response.ChatMessageEvent;
+import vn.hcmute.edu.sia.dto.response.ChatReadReceiptEvent;
+import vn.hcmute.edu.sia.dto.response.MarkChatReadResponse;
 import vn.hcmute.edu.sia.entity.Account;
 import vn.hcmute.edu.sia.entity.AdvisorProfile;
 import vn.hcmute.edu.sia.entity.ChatConversation;
@@ -210,13 +219,242 @@ class ChatServiceImplTest {
 
         ChatHistoryResponse history = chatService.getHistory(studentId, advisorId, 0, 30);
 
+        assertThat(history.conversationId()).isEqualTo(conv.getId());
         assertThat(history.hasNext()).isFalse();
         assertThat(history.messages()).hasSize(2);
+        assertThat(history.messages().get(0).conversationId()).isEqualTo(conv.getId());
         assertThat(history.messages().get(0).message()).isEqualTo("Tin nhắn 1");
         assertThat(history.messages().get(0).senderId()).isEqualTo(studentId.toString());
         assertThat(history.messages().get(0).recipientId()).isEqualTo(advisorId.toString());
         assertThat(history.messages().get(1).message()).isEqualTo("Tin nhắn 2");
         assertThat(history.messages().get(1).senderId()).isEqualTo(advisorId.toString());
         assertThat(history.messages().get(1).recipientId()).isEqualTo(studentId.toString());
+    }
+
+    @Test
+    @DisplayName("Gửi lại tin nhắn trùng clientMessageId không lưu bản ghi mới và chỉ xác nhận lại cho người gửi")
+    void sendPrivateMessage_DuplicateClientMessageIdPreCheck_AcksOnlySender() {
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(student));
+        when(accountRepository.findById(advisorId)).thenReturn(Optional.of(advisor));
+        when(student.getId()).thenReturn(studentId);
+        when(student.getRole()).thenReturn(AccountRole.STUDENT);
+        when(student.getEmail()).thenReturn("student@hcmute.edu.vn");
+        when(advisor.getId()).thenReturn(advisorId);
+        when(advisor.getRole()).thenReturn(AccountRole.ADVISOR);
+
+        DirectConversation conv = new DirectConversation(studentId, advisorId);
+        when(conversationRepository.findByStudentIdAndAdvisorIdAndConversationType(
+                studentId.toString(), advisorId.toString(), "ADVISOR"
+        )).thenReturn(Optional.of(conv));
+
+        UserMessage existing = new UserMessage(conv.getId(), studentId, AccountRole.STUDENT, "Tin cũ", "client-uuid-1");
+        when(mongoTemplate.findOne(any(Query.class), eq(UserMessage.class))).thenReturn(existing);
+
+        chatService.sendPrivateMessage(studentId, new SendChatMessageRequest(advisorId, "Tin cũ", "  client-uuid-1  "));
+
+        verify(messageRepository, never()).save(any());
+        ArgumentCaptor<Query> queryCaptor = ArgumentCaptor.forClass(Query.class);
+        verify(mongoTemplate).updateFirst(queryCaptor.capture(), any(Update.class), eq(ChatConversation.class));
+        List<Document> orBranches = queryCaptor.getValue().getQueryObject().getList("$or", Document.class);
+        assertThat(orBranches).anySatisfy(branch ->
+                assertThat(branch.get("last_message_at", Document.class)).containsKey("$lt")
+        );
+
+        ArgumentCaptor<ChatMessageEvent> eventCaptor = ArgumentCaptor.forClass(ChatMessageEvent.class);
+        verify(messagingTemplate).convertAndSendToUser(eq("student@hcmute.edu.vn"), eq("/queue/messages"), eventCaptor.capture());
+        verify(messagingTemplate, never()).convertAndSendToUser(eq("advisor@hcmute.edu.vn"), anyString(), any());
+
+        assertThat(eventCaptor.getValue().type()).isEqualTo("CHAT");
+        assertThat(eventCaptor.getValue().messageId()).isEqualTo(existing.getId());
+        assertThat(eventCaptor.getValue().clientMessageId()).isEqualTo("client-uuid-1");
+        assertThat(eventCaptor.getValue().conversationId()).isEqualTo(conv.getId());
+    }
+
+    @Test
+    @DisplayName("Đua ghi song song trùng clientMessageId gặp DuplicateKeyException chỉ xác nhận lại cho người gửi")
+    void sendPrivateMessage_ConcurrentDuplicateKey_AcksOnlySender() {
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(student));
+        when(accountRepository.findById(advisorId)).thenReturn(Optional.of(advisor));
+        when(student.getId()).thenReturn(studentId);
+        when(student.getRole()).thenReturn(AccountRole.STUDENT);
+        when(student.getEmail()).thenReturn("student@hcmute.edu.vn");
+        when(advisor.getId()).thenReturn(advisorId);
+        when(advisor.getRole()).thenReturn(AccountRole.ADVISOR);
+
+        DirectConversation conv = new DirectConversation(studentId, advisorId);
+        when(conversationRepository.findByStudentIdAndAdvisorIdAndConversationType(
+                studentId.toString(), advisorId.toString(), "ADVISOR"
+        )).thenReturn(Optional.of(conv));
+
+        UserMessage existing = new UserMessage(conv.getId(), studentId, AccountRole.STUDENT, "Tin song song", "client-race-1");
+        when(mongoTemplate.findOne(any(Query.class), eq(UserMessage.class)))
+                .thenReturn(null)
+                .thenReturn(existing);
+        when(messageRepository.save(any(UserMessage.class)))
+                .thenThrow(new DuplicateKeyException("uq_direct_msg_client_id"));
+
+        chatService.sendPrivateMessage(studentId, new SendChatMessageRequest(advisorId, "Tin song song", "client-race-1"));
+
+        verify(mongoTemplate).updateFirst(any(Query.class), any(Update.class), eq(ChatConversation.class));
+        verify(messagingTemplate).convertAndSendToUser(eq("student@hcmute.edu.vn"), eq("/queue/messages"), any(ChatMessageEvent.class));
+        verify(messagingTemplate, never()).convertAndSendToUser(eq("advisor@hcmute.edu.vn"), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("Đánh dấu đã đọc dùng findAndModify $max theo createdAt và phát ChatReadReceiptEvent tới cả 2 phía")
+    void markConversationAsRead_ByLastMessageId_UpdatesMaxAndBroadcastsToBoth() {
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(student));
+        when(accountRepository.findById(advisorId)).thenReturn(Optional.of(advisor));
+        when(student.getId()).thenReturn(studentId);
+        when(student.getRole()).thenReturn(AccountRole.STUDENT);
+        when(student.getEmail()).thenReturn("student@hcmute.edu.vn");
+        when(advisor.getId()).thenReturn(advisorId);
+        when(advisor.getRole()).thenReturn(AccountRole.ADVISOR);
+        when(advisor.getEmail()).thenReturn("advisor@hcmute.edu.vn");
+
+        DirectConversation conv = new DirectConversation(studentId, advisorId);
+        when(conversationRepository.findByStudentIdAndAdvisorIdAndConversationType(
+                studentId.toString(), advisorId.toString(), "ADVISOR"
+        )).thenReturn(Optional.of(conv));
+
+        Instant displayedCreatedAt = Instant.parse("2026-11-24T10:15:30Z");
+        UserMessage displayedMsg = new UserMessage(conv.getId(), advisorId, AccountRole.ADVISOR, "Thầy đã xem hồ sơ");
+        ReflectionTestUtils.setField(displayedMsg, "createdAt", displayedCreatedAt);
+
+        when(messageRepository.findById(displayedMsg.getId())).thenReturn(Optional.of(displayedMsg));
+        when(mongoTemplate.findAndModify(
+                any(Query.class),
+                any(Update.class),
+                any(FindAndModifyOptions.class),
+                eq(DirectConversation.class)
+        )).thenReturn(conv);
+
+        MarkChatReadResponse response = chatService.markConversationAsRead(
+                studentId,
+                new MarkChatReadRequest(advisorId, displayedMsg.getId(), null)
+        );
+
+        assertThat(response.updated()).isTrue();
+        assertThat(response.conversationId()).isEqualTo(conv.getId());
+        assertThat(response.lastReadAt()).isEqualTo(displayedCreatedAt);
+
+        ArgumentCaptor<Update> updateCaptor = ArgumentCaptor.forClass(Update.class);
+        verify(mongoTemplate).findAndModify(
+                any(Query.class),
+                updateCaptor.capture(),
+                any(FindAndModifyOptions.class),
+                eq(DirectConversation.class)
+        );
+        Document updateDoc = updateCaptor.getValue().getUpdateObject();
+        assertThat(updateDoc.get("$max", Document.class).get("student_last_read_at")).isEqualTo(displayedCreatedAt);
+
+        ArgumentCaptor<ChatReadReceiptEvent> receiptCaptor = ArgumentCaptor.forClass(ChatReadReceiptEvent.class);
+        verify(messagingTemplate).convertAndSendToUser(eq("advisor@hcmute.edu.vn"), eq("/queue/read-receipts"), receiptCaptor.capture());
+        verify(messagingTemplate).convertAndSendToUser(eq("student@hcmute.edu.vn"), eq("/queue/read-receipts"), any(ChatReadReceiptEvent.class));
+
+        assertThat(receiptCaptor.getValue().type()).isEqualTo("READ_RECEIPT");
+        assertThat(receiptCaptor.getValue().readerId()).isEqualTo(studentId.toString());
+        assertThat(receiptCaptor.getValue().lastReadAt()).isEqualTo(displayedCreatedAt);
+    }
+
+    @Test
+    @DisplayName("Đánh dấu đã đọc khi tab khác vừa nâng mốc mới hơn trả đúng mốc DB và không phát lặp READ_RECEIPT")
+    void markConversationAsRead_ConcurrentNewerWatermark_ReturnsActualDbWatermark() {
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(student));
+        when(accountRepository.findById(advisorId)).thenReturn(Optional.of(advisor));
+        when(student.getRole()).thenReturn(AccountRole.STUDENT);
+        when(advisor.getRole()).thenReturn(AccountRole.ADVISOR);
+
+        Instant initialReadAt = Instant.parse("2026-11-24T10:00:00Z");
+        Instant tabAReadAt = Instant.parse("2026-11-24T10:10:00Z");
+        Instant tabBTargetReadAt = Instant.parse("2026-11-24T10:05:00Z");
+
+        DirectConversation conv = new DirectConversation(studentId, advisorId);
+        ReflectionTestUtils.setField(conv, "lastMessageAt", tabAReadAt);
+        ReflectionTestUtils.setField(conv, "studentLastReadAt", initialReadAt);
+
+        DirectConversation stateJustBeforeUpdate = new DirectConversation(studentId, advisorId);
+        ReflectionTestUtils.setField(stateJustBeforeUpdate, "lastMessageAt", tabAReadAt);
+        ReflectionTestUtils.setField(stateJustBeforeUpdate, "studentLastReadAt", tabAReadAt);
+
+        when(conversationRepository.findByStudentIdAndAdvisorIdAndConversationType(
+                studentId.toString(), advisorId.toString(), "ADVISOR"
+        )).thenReturn(Optional.of(conv));
+        when(mongoTemplate.findAndModify(
+                any(Query.class),
+                any(Update.class),
+                any(FindAndModifyOptions.class),
+                eq(DirectConversation.class)
+        )).thenReturn(stateJustBeforeUpdate);
+
+        MarkChatReadResponse response = chatService.markConversationAsRead(
+                studentId,
+                new MarkChatReadRequest(advisorId, null, tabBTargetReadAt)
+        );
+
+        assertThat(response.updated()).isFalse();
+        assertThat(response.lastReadAt()).isEqualTo(tabAReadAt);
+        verifyNoInteractions(messagingTemplate);
+    }
+
+    @Test
+    @DisplayName("Từ chối đánh dấu đã đọc nếu lastMessageId thuộc hội thoại khác")
+    void markConversationAsRead_MessageFromOtherConversation_ThrowsBadRequest() {
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(student));
+        when(accountRepository.findById(advisorId)).thenReturn(Optional.of(advisor));
+        when(student.getRole()).thenReturn(AccountRole.STUDENT);
+        when(advisor.getRole()).thenReturn(AccountRole.ADVISOR);
+
+        DirectConversation conv = new DirectConversation(studentId, advisorId);
+        when(conversationRepository.findByStudentIdAndAdvisorIdAndConversationType(
+                studentId.toString(), advisorId.toString(), "ADVISOR"
+        )).thenReturn(Optional.of(conv));
+
+        UserMessage foreignMsg = new UserMessage("other-conv", advisorId, AccountRole.ADVISOR, "Tin khác");
+        when(messageRepository.findById(foreignMsg.getId())).thenReturn(Optional.of(foreignMsg));
+
+        assertThatThrownBy(() -> chatService.markConversationAsRead(
+                studentId,
+                new MarkChatReadRequest(advisorId, foreignMsg.getId(), null)
+        ))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("does not belong to this conversation");
+    }
+
+    @Test
+    @DisplayName("getConversations tính unreadCount từ aggregation theo mốc đọc và trả kèm partnerLastReadAt")
+    void getConversations_ComputesUnreadCountAndPartnerLastReadAt() {
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(student));
+        when(student.getRole()).thenReturn(AccountRole.STUDENT);
+
+        DirectConversation conv = new DirectConversation(studentId, advisorId);
+        Instant partnerReadAt = Instant.parse("2026-11-24T09:00:00Z");
+        Instant msgAt = Instant.parse("2026-11-24T10:00:00Z");
+        ReflectionTestUtils.setField(conv, "lastMessage", "Em kiểm tra lại lịch thi nhé");
+        ReflectionTestUtils.setField(conv, "lastMessageAt", msgAt);
+        ReflectionTestUtils.setField(conv, "advisorLastReadAt", partnerReadAt);
+
+        when(conversationRepository.findByStudentIdAndConversationType(studentId.toString(), "ADVISOR"))
+                .thenReturn(List.of(conv));
+
+        when(advisor.getId()).thenReturn(advisorId);
+        when(advisor.getFullName()).thenReturn("TS. Nguyễn Văn A");
+        when(advisor.getRole()).thenReturn(AccountRole.ADVISOR);
+        when(accountRepository.findAllById(any())).thenReturn(List.of(advisor));
+        when(advisorProfileRepository.findAllWithAccountAndDepartmentByAccountIdIn(any(), eq(AccountRole.ADVISOR)))
+                .thenReturn(List.of());
+
+        AggregationResults<Document> aggResults = new AggregationResults<>(
+                List.of(new Document("_id", conv.getId()).append("unreadCount", 3L)),
+                new Document()
+        );
+        when(mongoTemplate.aggregate(any(Aggregation.class), eq("messages"), eq(Document.class)))
+                .thenReturn(aggResults);
+
+        List<ChatConversationResponse> responses = chatService.getConversations(studentId);
+
+        assertThat(responses).hasSize(1);
+        assertThat(responses.getFirst().unreadCount()).isEqualTo(3L);
+        assertThat(responses.getFirst().partnerLastReadAt()).isEqualTo(partnerReadAt);
     }
 }

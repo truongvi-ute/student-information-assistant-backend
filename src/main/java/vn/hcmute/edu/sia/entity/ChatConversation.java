@@ -1,6 +1,7 @@
 package vn.hcmute.edu.sia.entity;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -55,7 +56,7 @@ public abstract class ChatConversation {
             throw new IllegalArgumentException("Conversation type must not be blank");
         }
 
-        Instant now = Instant.now();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
 
         this.id = UUID.randomUUID().toString();
         this.studentId = studentId.toString();
@@ -67,7 +68,7 @@ public abstract class ChatConversation {
 
     public void softDelete() {
         if (this.deletedAt == null) {
-            Instant now = Instant.now();
+            Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
             this.deletedAt = now;
             this.updatedAt = now;
             this.status = "CLOSED";

@@ -17,15 +17,29 @@ import vn.hcmute.edu.sia.enums.MessageSenderType;
 public class UserMessage extends ChatMessage {
 
     public static final int MAX_CONTENT_LENGTH = 2000;
+    public static final int MAX_CLIENT_MESSAGE_ID_LENGTH = 128;
 
     @Field("sender_user_id")
     private String senderUserId;
+
+    @Field("client_message_id")
+    private String clientMessageId;
 
     public UserMessage(
             String conversationId,
             UUID senderUserId,
             AccountRole senderRole,
             String content
+    ) {
+        this(conversationId, senderUserId, senderRole, content, null);
+    }
+
+    public UserMessage(
+            String conversationId,
+            UUID senderUserId,
+            AccountRole senderRole,
+            String content,
+            String clientMessageId
     ) {
         super(
                 conversationId,
@@ -34,6 +48,20 @@ public class UserMessage extends ChatMessage {
                 MAX_CONTENT_LENGTH
         );
         this.senderUserId = senderUserId.toString();
+        this.clientMessageId = normalizeClientMessageId(clientMessageId);
+    }
+
+    public static String normalizeClientMessageId(String clientMessageId) {
+        if (clientMessageId == null || clientMessageId.isBlank()) {
+            return null;
+        }
+        String normalized = clientMessageId.strip();
+        if (normalized.length() > MAX_CLIENT_MESSAGE_ID_LENGTH) {
+            throw new IllegalArgumentException(
+                    "Client message ID must not exceed " + MAX_CLIENT_MESSAGE_ID_LENGTH + " characters"
+            );
+        }
+        return normalized;
     }
 
     private static MessageSenderType resolveSenderType(

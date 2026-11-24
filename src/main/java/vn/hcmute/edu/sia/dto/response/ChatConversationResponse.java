@@ -11,5 +11,7 @@ public record ChatConversationResponse(
         AccountRole partnerRole,
         String partnerDepartment,
         String lastMessage,
-        Instant lastMessageAt
+        Instant lastMessageAt,
+        long unreadCount,
+        Instant partnerLastReadAt
 ) {}

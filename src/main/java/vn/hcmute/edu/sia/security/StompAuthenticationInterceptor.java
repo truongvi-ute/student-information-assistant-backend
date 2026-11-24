@@ -10,6 +10,8 @@ import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Component;
 
 import io.jsonwebtoken.JwtException;
@@ -42,9 +44,31 @@ public class StompAuthenticationInterceptor implements ChannelInterceptor {
                         StompHeaderAccessor.class
                 );
 
-        // Xác thực lúc client mở phiên STOMP.
-        if (accessor == null || accessor.getCommand() != StompCommand.CONNECT) {
+        if (accessor == null || accessor.getCommand() == null) {
             return message;
+        }
+
+        StompCommand command = accessor.getCommand();
+        if (command == StompCommand.DISCONNECT || command == StompCommand.UNSUBSCRIBE) {
+            return message;
+        }
+
+        if (command != StompCommand.CONNECT && command != StompCommand.STOMP) {
+            validateAuthorizedSession(accessor);
+            String destination = accessor.getDestination();
+            if (command == StompCommand.SEND) {
+                if (destination == null || !destination.startsWith("/app/") || destination.contains("..")) {
+                    throw new AccessDeniedException("Invalid STOMP SEND destination.");
+                }
+                return message;
+            }
+            if (command == StompCommand.SUBSCRIBE) {
+                if (destination == null || !destination.startsWith("/user/queue/") || destination.contains("..")) {
+                    throw new AccessDeniedException("Invalid STOMP SUBSCRIBE destination.");
+                }
+                return message;
+            }
+            throw new AccessDeniedException("Unsupported STOMP command.");
         }
 
         String authorization =
@@ -78,7 +102,6 @@ public class StompAuthenticationInterceptor implements ChannelInterceptor {
             );
         }
 
-        // Chat này chỉ dành cho advisor và student.
         if (account.getRole() != AccountRole.ADVISOR
                 && account.getRole() != AccountRole.STUDENT) {
             throw new AccessDeniedException(
@@ -95,9 +118,34 @@ public class StompAuthenticationInterceptor implements ChannelInterceptor {
                         principal.getAuthorities()
                 );
 
-        // Gắn người dùng đã xác thực vào phiên WebSocket.
         accessor.setUser(authentication);
 
         return message;
+    }
+
+    private void validateAuthorizedSession(StompHeaderAccessor accessor) {
+        if (!(accessor.getUser() instanceof Authentication authentication)
+                || !(authentication.getPrincipal() instanceof AccountPrincipal principal)) {
+            throw new AccessDeniedException("Unauthenticated STOMP session.");
+        }
+
+        boolean isAdvisor = false;
+        boolean isStudent = false;
+        for (GrantedAuthority authority : authentication.getAuthorities()) {
+            String role = authority.getAuthority();
+            if ("ROLE_ADVISOR".equals(role)) {
+                isAdvisor = true;
+            } else if ("ROLE_STUDENT".equals(role)) {
+                isStudent = true;
+            }
+        }
+
+        if (!isAdvisor && !isStudent) {
+            throw new AccessDeniedException("Only advisors and students can use chat.");
+        }
+
+        if (isAdvisor && principal.isPasswordChangeRequired()) {
+            throw new AccessDeniedException("Password change is required before using chat.");
+        }
     }
 }

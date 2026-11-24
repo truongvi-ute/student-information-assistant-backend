@@ -97,6 +97,22 @@ class ChatDomainTest {
         assertThatThrownBy(() -> new UserMessage("conv-1", userId, AccountRole.STUDENT, "a".repeat(2001)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("2000 characters");
+
+        assertThatThrownBy(() -> new UserMessage("conv-1", userId, AccountRole.STUDENT, "Hello", "x".repeat(129)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("128 characters");
+    }
+
+    @Test
+    @DisplayName("Chuẩn hóa clientMessageId trên UserMessage thành null khi trống và strip khoảng trắng")
+    void createUserMessage_NormalizesClientMessageId() {
+        UUID studentId = UUID.randomUUID();
+
+        UserMessage blankClientId = new UserMessage("conv-1", studentId, AccountRole.STUDENT, "Xin chào", "   ");
+        UserMessage trimmedClientId = new UserMessage("conv-1", studentId, AccountRole.STUDENT, "Xin chào", "  msg-123  ");
+
+        assertThat(blankClientId.getClientMessageId()).isNull();
+        assertThat(trimmedClientId.getClientMessageId()).isEqualTo("msg-123");
     }
 
     @Test

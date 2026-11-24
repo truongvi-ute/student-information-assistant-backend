@@ -1,9 +1,13 @@
 package vn.hcmute.edu.sia.service.implement;
 
+import org.bson.Document;
 import org.springframework.dao.DuplicateKeyException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -11,16 +15,19 @@ import org.springframework.http.HttpStatus;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+import vn.hcmute.edu.sia.dto.request.MarkChatReadRequest;
 import vn.hcmute.edu.sia.dto.request.SendChatMessageRequest;
 import vn.hcmute.edu.sia.dto.response.*;
 import vn.hcmute.edu.sia.entity.Account;
 import vn.hcmute.edu.sia.entity.AdvisorProfile;
 import vn.hcmute.edu.sia.entity.ChatConversation;
+import vn.hcmute.edu.sia.entity.ChatMessage;
 import vn.hcmute.edu.sia.entity.DirectConversation;
 import vn.hcmute.edu.sia.entity.UserMessage;
 import vn.hcmute.edu.sia.enums.AccountAccessStatus;
 import vn.hcmute.edu.sia.enums.AccountRole;
 import vn.hcmute.edu.sia.enums.CatalogStatus;
+import vn.hcmute.edu.sia.enums.MessageSenderType;
 import vn.hcmute.edu.sia.repository.AccountRepository;
 import vn.hcmute.edu.sia.repository.AdvisorProfileRepository;
 import vn.hcmute.edu.sia.repository.ChatConversationRepository;
@@ -29,6 +36,7 @@ import vn.hcmute.edu.sia.repository.DepartmentRepository;
 import vn.hcmute.edu.sia.service.ChatService;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -36,6 +44,9 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class ChatServiceImpl implements ChatService {
+    private static final String USER_QUEUE_MESSAGES = "/queue/messages";
+    private static final String USER_QUEUE_READ_RECEIPTS = "/queue/read-receipts";
+
     private final AccountRepository accountRepository;
     private final AdvisorProfileRepository advisorProfileRepository;
     private final DepartmentRepository departmentRepository;
@@ -49,17 +60,22 @@ public class ChatServiceImpl implements ChatService {
             UUID senderId,
             SendChatMessageRequest request
     ) {
+        if (request == null || request.recipientId() == null) {
+            throw new IllegalArgumentException("Recipient ID must not be null");
+        }
+
         Account sender = accountRepository.findById(senderId)
                 .orElseThrow(() -> new IllegalArgumentException("Sender not found"));
 
         Account recipient = accountRepository.findById(request.recipientId())
                 .orElseThrow(() -> new IllegalArgumentException("Recipient not found"));
 
-        boolean allowedPair =
-                (sender.getRole() == AccountRole.ADVISOR
-                        && recipient.getRole() == AccountRole.STUDENT)
-                        || (sender.getRole() == AccountRole.STUDENT
-                        && recipient.getRole() == AccountRole.ADVISOR);
+        if (sender.getAccessStatus() == AccountAccessStatus.BLOCKED
+                || recipient.getAccessStatus() == AccountAccessStatus.BLOCKED) {
+            throw new IllegalArgumentException("Blocked accounts cannot send or receive chat messages");
+        }
+
+        boolean allowedPair = isAllowedDirectPair(sender.getRole(), recipient.getRole());
 
         if (!allowedPair) {
             throw new IllegalArgumentException(
@@ -75,6 +91,8 @@ public class ChatServiceImpl implements ChatService {
             throw new IllegalArgumentException("Message must not be blank");
         }
 
+        String clientMessageId = UserMessage.normalizeClientMessageId(request.clientMessageId());
+
         Account student = sender.getRole() == AccountRole.STUDENT
                 ? sender
                 : recipient;
@@ -88,43 +106,62 @@ public class ChatServiceImpl implements ChatService {
                 advisor
         );
 
+        if (clientMessageId != null) {
+            UserMessage existingMessage = findExistingUserMessage(
+                    conversation.getId(),
+                    sender.getId().toString(),
+                    clientMessageId
+            );
+            if (existingMessage != null) {
+                boolean repaired = updateConversationLastMessage(conversation.getId(), existingMessage, false);
+                ChatMessageEvent event = toChatEvent(existingMessage, sender.getId(), recipient.getId());
+                if (repaired
+                        && existingMessage.getCreatedAt() != null
+                        && !existingMessage.getCreatedAt().isAfter(Instant.now().minusSeconds(1))) {
+                    sendEventToUser(recipient.getEmail(), USER_QUEUE_MESSAGES, event);
+                }
+                sendEventToUser(sender.getEmail(), USER_QUEUE_MESSAGES, event);
+                return;
+            }
+        }
+
         UserMessage message = new UserMessage(
                 conversation.getId(),
                 sender.getId(),
                 sender.getRole(),
-                content
+                content,
+                clientMessageId
         );
 
-        UserMessage saved = messageRepository.save(message);
+        UserMessage saved;
+        try {
+            saved = messageRepository.save(message);
+        } catch (DuplicateKeyException exception) {
+            if (clientMessageId != null) {
+                UserMessage concurrentExisting = findExistingUserMessage(
+                        conversation.getId(),
+                        sender.getId().toString(),
+                        clientMessageId
+                );
+                if (concurrentExisting != null) {
+                    updateConversationLastMessage(conversation.getId(), concurrentExisting, false);
+                    sendEventToUser(
+                            sender.getEmail(),
+                            USER_QUEUE_MESSAGES,
+                            toChatEvent(concurrentExisting, sender.getId(), recipient.getId())
+                    );
+                    return;
+                }
+            }
+            throw exception;
+        }
 
-        Query updateQuery = new Query(
-                Criteria.where("_id").is(conversation.getId())
-                        .orOperator(
-                                Criteria.where("last_message_at").exists(false),
-                                Criteria.where("last_message_at").lte(saved.getCreatedAt())
-                        )
-        );
-        Update update = new Update()
-                .set("last_message", saved.getContent())
-                .set("last_message_at", saved.getCreatedAt())
-                .set("updated_at", saved.getCreatedAt());
-        mongoTemplate.updateFirst(updateQuery, update, ChatConversation.class);
+        updateConversationLastMessage(conversation.getId(), saved, true);
 
-        ChatMessageEvent event = new ChatMessageEvent(
-                saved.getId(),
-                sender.getId().toString(),
-                recipient.getId().toString(),
-                saved.getContent(),
-                "CHAT",
-                saved.getCreatedAt()
-        );
+        ChatMessageEvent event = toChatEvent(saved, sender.getId(), recipient.getId());
 
-        messagingTemplate.convertAndSendToUser(
-                recipient.getEmail(), "/queue/messages", event
-        );
-        messagingTemplate.convertAndSendToUser(
-                sender.getEmail(), "/queue/messages", event
-        );
+        sendEventToUser(recipient.getEmail(), USER_QUEUE_MESSAGES, event);
+        sendEventToUser(sender.getEmail(), USER_QUEUE_MESSAGES, event);
     }
 
     @Override
@@ -231,6 +268,8 @@ public class ChatServiceImpl implements ChatService {
                     ));
         }
 
+        Map<String, Long> unreadCounts = computeUnreadCounts(activeConversations, currentUser.getRole());
+
         List<ChatConversationResponse> result = new ArrayList<>();
         for (DirectConversation conv : activeConversations) {
             UUID partnerId;
@@ -269,6 +308,11 @@ public class ChatServiceImpl implements ChatService {
                 }
             }
 
+            Instant partnerLastReadAt = currentUser.getRole() == AccountRole.STUDENT
+                    ? conv.getAdvisorLastReadAt()
+                    : conv.getStudentLastReadAt();
+            long unreadCount = unreadCounts.getOrDefault(conv.getId(), 0L);
+
             result.add(new ChatConversationResponse(
                     conv.getId(),
                     partner.getId(),
@@ -276,7 +320,9 @@ public class ChatServiceImpl implements ChatService {
                     partner.getRole(),
                     departmentName,
                     lastMsg != null ? lastMsg : "",
-                    lastMsgAt != null ? lastMsgAt : conv.getCreatedAt()
+                    lastMsgAt != null ? lastMsgAt : conv.getCreatedAt(),
+                    unreadCount,
+                    partnerLastReadAt
             ));
         }
 
@@ -290,6 +336,90 @@ public class ChatServiceImpl implements ChatService {
         });
 
         return result;
+    }
+
+    @Override
+    public MarkChatReadResponse markConversationAsRead(
+            UUID currentUserId,
+            MarkChatReadRequest request
+    ) {
+        if (request == null || request.contactId() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Contact ID is required");
+        }
+
+        Account currentUser = accountRepository.findById(currentUserId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account not found"));
+
+        Account contact = accountRepository.findById(request.contactId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Contact not found"));
+
+        if (!isAllowedDirectPair(currentUser.getRole(), contact.getRole())) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Chat is only allowed between advisor and student"
+            );
+        }
+
+        UUID studentId = currentUser.getRole() == AccountRole.STUDENT
+                ? currentUserId
+                : request.contactId();
+        UUID advisorId = currentUser.getRole() == AccountRole.ADVISOR
+                ? currentUserId
+                : request.contactId();
+
+        var conversationOpt = conversationRepository.findByStudentIdAndAdvisorIdAndConversationType(
+                studentId.toString(),
+                advisorId.toString(),
+                "ADVISOR"
+        );
+
+        if (conversationOpt.isEmpty() || conversationOpt.get().getDeletedAt() != null) {
+            return new MarkChatReadResponse(null, request.contactId(), null, false);
+        }
+
+        DirectConversation conv = conversationOpt.get();
+        Instant targetReadAt = resolveTargetReadAt(conv, request);
+        if (targetReadAt == null) {
+            return new MarkChatReadResponse(conv.getId(), request.contactId(), null, false);
+        }
+
+        boolean isStudent = currentUser.getRole() == AccountRole.STUDENT;
+        String readField = isStudent ? "student_last_read_at" : "advisor_last_read_at";
+
+        Query query = new Query(
+                Criteria.where("_id").is(conv.getId())
+                        .and("deleted_at").isNull()
+        );
+        Update update = new Update().max(readField, targetReadAt);
+        DirectConversation beforeUpdate = mongoTemplate.findAndModify(
+                query,
+                update,
+                FindAndModifyOptions.options().returnNew(false),
+                DirectConversation.class
+        );
+
+        if (beforeUpdate == null) {
+            return new MarkChatReadResponse(null, request.contactId(), null, false);
+        }
+
+        Instant beforeReadAt = isStudent
+                ? beforeUpdate.getStudentLastReadAt()
+                : beforeUpdate.getAdvisorLastReadAt();
+        boolean updated = beforeReadAt == null || targetReadAt.isAfter(beforeReadAt);
+        Instant effectiveReadAt = updated ? targetReadAt : beforeReadAt;
+
+        if (updated) {
+            ChatReadReceiptEvent receiptEvent = ChatReadReceiptEvent.of(
+                    conv.getId(),
+                    currentUser.getId().toString(),
+                    contact.getId().toString(),
+                    effectiveReadAt
+            );
+            sendEventToUser(contact.getEmail(), USER_QUEUE_READ_RECEIPTS, receiptEvent);
+            sendEventToUser(currentUser.getEmail(), USER_QUEUE_READ_RECEIPTS, receiptEvent);
+        }
+
+        return new MarkChatReadResponse(conv.getId(), request.contactId(), effectiveReadAt, updated);
     }
 
     @Override
@@ -316,11 +446,7 @@ public class ChatServiceImpl implements ChatService {
                         HttpStatus.NOT_FOUND, "Contact not found"
                 ));
 
-        boolean allowedPair =
-                (currentUser.getRole() == AccountRole.STUDENT
-                        && contact.getRole() == AccountRole.ADVISOR)
-                        || (currentUser.getRole() == AccountRole.ADVISOR
-                        && contact.getRole() == AccountRole.STUDENT);
+        boolean allowedPair = isAllowedDirectPair(currentUser.getRole(), contact.getRole());
 
         if (!allowedPair) {
             throw new ResponseStatusException(
@@ -338,18 +464,24 @@ public class ChatServiceImpl implements ChatService {
         var conversation = conversationRepository
                 .findByStudentIdAndAdvisorIdAndConversationType(studentId.toString(), advisorId.toString(), "ADVISOR");
 
-        if (conversation.isEmpty()) {
-            return new ChatHistoryResponse(List.of(), false);
+        if (conversation.isEmpty() || conversation.get().getDeletedAt() != null) {
+            return new ChatHistoryResponse(null, List.of(), false, null, null);
         }
+
+        DirectConversation conv = conversation.get();
+        boolean isStudent = currentUser.getRole() == AccountRole.STUDENT;
+        Instant myLastReadAt = isStudent ? conv.getStudentLastReadAt() : conv.getAdvisorLastReadAt();
+        Instant partnerLastReadAt = isStudent ? conv.getAdvisorLastReadAt() : conv.getStudentLastReadAt();
 
         var slice = messageRepository
                 .findByConversationIdOrderByCreatedAtDescIdDesc(
-                        conversation.get().getId(),
+                        conv.getId(),
                         PageRequest.of(page, size)
                 );
 
         List<ChatMessageResponse> messages = new ArrayList<>(
                 slice.getContent().stream()
+                        .filter(msg -> msg.getDeletedAt() == null)
                         .filter(UserMessage.class::isInstance)
                         .map(UserMessage.class::cast)
                         .map(message -> {
@@ -361,6 +493,8 @@ public class ChatServiceImpl implements ChatService {
 
                             return new ChatMessageResponse(
                                     message.getId(),
+                                    conv.getId(),
+                                    message.getClientMessageId(),
                                     senderId,
                                     recipientId,
                                     message.getContent(),
@@ -372,7 +506,166 @@ public class ChatServiceImpl implements ChatService {
 
         Collections.reverse(messages);
 
-        return new ChatHistoryResponse(messages, slice.hasNext());
+        return new ChatHistoryResponse(
+                conv.getId(),
+                messages,
+                slice.hasNext(),
+                partnerLastReadAt,
+                myLastReadAt
+        );
+    }
+
+    private Instant resolveTargetReadAt(DirectConversation conv, MarkChatReadRequest request) {
+        if (request.lastMessageId() != null && !request.lastMessageId().isBlank()) {
+            ChatMessage targetMsg = messageRepository.findById(request.lastMessageId().strip())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Message not found"));
+            if (!conv.getId().equals(targetMsg.getConversationId()) || targetMsg.getDeletedAt() != null) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "Message does not belong to this conversation"
+                );
+            }
+            return targetMsg.getCreatedAt() != null
+                    ? targetMsg.getCreatedAt().truncatedTo(ChronoUnit.MILLIS)
+                    : null;
+        }
+
+        if (request.lastReadAt() != null) {
+            if (conv.getLastMessageAt() == null) {
+                return null;
+            }
+            Instant truncatedRequest = request.lastReadAt().truncatedTo(ChronoUnit.MILLIS);
+            Instant truncatedLast = conv.getLastMessageAt().truncatedTo(ChronoUnit.MILLIS);
+            return truncatedRequest.isAfter(truncatedLast) ? truncatedLast : truncatedRequest;
+        }
+
+        throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "Either lastMessageId or lastReadAt is required"
+        );
+    }
+
+    private Map<String, Long> computeUnreadCounts(
+            List<DirectConversation> conversations,
+            AccountRole currentUserRole
+    ) {
+        MessageSenderType partnerSenderType = currentUserRole == AccountRole.STUDENT
+                ? MessageSenderType.ADVISOR
+                : MessageSenderType.STUDENT;
+
+        List<Criteria> conversationCriteriaList = new ArrayList<>();
+        for (DirectConversation conv : conversations) {
+            Instant myLastReadAt = currentUserRole == AccountRole.STUDENT
+                    ? conv.getStudentLastReadAt()
+                    : conv.getAdvisorLastReadAt();
+
+            if (myLastReadAt != null
+                    && conv.getLastMessageAt() != null
+                    && !conv.getLastMessageAt().isAfter(myLastReadAt)) {
+                continue;
+            }
+
+            if (myLastReadAt == null) {
+                conversationCriteriaList.add(Criteria.where("conversation_id").is(conv.getId()));
+            } else {
+                conversationCriteriaList.add(
+                        Criteria.where("conversation_id").is(conv.getId())
+                                .and("created_at").gt(myLastReadAt)
+                );
+            }
+        }
+
+        if (conversationCriteriaList.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Criteria matchCriteria = new Criteria().andOperator(
+                Criteria.where("deleted_at").isNull(),
+                Criteria.where("sender_type").is(partnerSenderType.name()),
+                new Criteria().orOperator(conversationCriteriaList.toArray(Criteria[]::new))
+        );
+
+        Aggregation aggregation = Aggregation.newAggregation(
+                Aggregation.match(matchCriteria),
+                Aggregation.group("conversation_id").count().as("unreadCount")
+        );
+
+        AggregationResults<Document> results =
+                mongoTemplate.aggregate(aggregation, "messages", Document.class);
+        if (results == null) {
+            return Collections.emptyMap();
+        }
+
+        Map<String, Long> unreadMap = new HashMap<>();
+        for (Document doc : results.getMappedResults()) {
+            Object idObj = doc.get("_id");
+            Object countObj = doc.get("unreadCount");
+            if (idObj != null && countObj instanceof Number number) {
+                unreadMap.put(idObj.toString(), number.longValue());
+            }
+        }
+        return unreadMap;
+    }
+
+    private boolean updateConversationLastMessage(
+            String conversationId,
+            UserMessage message,
+            boolean allowEqualTimestamp
+    ) {
+        Criteria timestampCriteria = allowEqualTimestamp
+                ? Criteria.where("last_message_at").lte(message.getCreatedAt())
+                : Criteria.where("last_message_at").lt(message.getCreatedAt());
+
+        Query updateQuery = new Query(
+                Criteria.where("_id").is(conversationId)
+                        .orOperator(
+                                Criteria.where("last_message_at").isNull(),
+                                timestampCriteria
+                        )
+        );
+        Update update = new Update()
+                .set("last_message", message.getContent())
+                .set("last_message_at", message.getCreatedAt())
+                .set("updated_at", message.getCreatedAt());
+        var result = mongoTemplate.updateFirst(updateQuery, update, ChatConversation.class);
+        return result != null && result.getModifiedCount() > 0;
+    }
+
+    private UserMessage findExistingUserMessage(
+            String conversationId,
+            String senderUserId,
+            String clientMessageId
+    ) {
+        Query query = new Query(
+                Criteria.where("conversation_id").is(conversationId)
+                        .and("sender_user_id").is(senderUserId)
+                        .and("client_message_id").is(clientMessageId)
+        );
+        return mongoTemplate.findOne(query, UserMessage.class);
+    }
+
+    private ChatMessageEvent toChatEvent(UserMessage saved, UUID senderId, UUID recipientId) {
+        return ChatMessageEvent.chat(
+                saved.getId(),
+                saved.getConversationId(),
+                saved.getClientMessageId(),
+                senderId.toString(),
+                recipientId.toString(),
+                saved.getContent(),
+                saved.getCreatedAt()
+        );
+    }
+
+    private void sendEventToUser(String userEmail, String destination, Object payload) {
+        if (userEmail == null || userEmail.isBlank()) {
+            return;
+        }
+        messagingTemplate.convertAndSendToUser(userEmail, destination, payload);
+    }
+
+    private static boolean isAllowedDirectPair(AccountRole role1, AccountRole role2) {
+        return (role1 == AccountRole.ADVISOR && role2 == AccountRole.STUDENT)
+                || (role1 == AccountRole.STUDENT && role2 == AccountRole.ADVISOR);
     }
 
     private DirectConversation getOrCreateConversation(
