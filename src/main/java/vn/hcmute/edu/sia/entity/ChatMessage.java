@@ -1,16 +1,35 @@
 package vn.hcmute.edu.sia.entity;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.CompoundIndex;
+import org.springframework.data.mongodb.core.index.CompoundIndexes;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 import vn.hcmute.edu.sia.enums.MessageSenderType;
 
 @Document(collection = "messages")
+@CompoundIndexes({
+        @CompoundIndex(
+                name = "uq_direct_msg_client_id",
+                def = "{'conversation_id': 1, 'sender_user_id': 1, 'client_message_id': 1}",
+                unique = true,
+                partialFilter = "{'client_message_id': {'$type': 'string'}, 'sender_user_id': {'$type': 'string'}}"
+        ),
+        @CompoundIndex(
+                name = "idx_msg_conv_sender_created",
+                def = "{'conversation_id': 1, 'sender_type': 1, 'created_at': -1}"
+        ),
+        @CompoundIndex(
+                name = "idx_msg_conv_created",
+                def = "{'conversation_id': 1, 'created_at': -1, '_id': -1}"
+        )
+})
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public abstract class ChatMessage {
@@ -61,7 +80,7 @@ public abstract class ChatMessage {
             );
         }
 
-        Instant now = Instant.now();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
 
         this.id = UUID.randomUUID().toString();
         this.conversationId = conversationId.strip();
@@ -74,7 +93,7 @@ public abstract class ChatMessage {
 
     public void deleteMessage() {
         if (this.deletedAt == null) {
-            Instant now = Instant.now();
+            Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
             this.deletedAt = now;
             this.updatedAt = now;
         }

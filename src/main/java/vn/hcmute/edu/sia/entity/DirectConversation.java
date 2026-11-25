@@ -1,5 +1,6 @@
 package vn.hcmute.edu.sia.entity;
 
+import java.time.Instant;
 import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -16,6 +17,12 @@ public class DirectConversation extends ChatConversation {
 
     @Field("advisor_id")
     private String advisorId;
+
+    @Field("student_last_read_at")
+    private Instant studentLastReadAt;
+
+    @Field("advisor_last_read_at")
+    private Instant advisorLastReadAt;
 
     public DirectConversation(UUID studentId, UUID advisorId) {
         super(studentId, "ADVISOR");
