@@ -205,6 +205,10 @@ CREATE TABLE document_rag_requests (
 		CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED'))
 );
 
+CREATE UNIQUE INDEX uq_document_rag_requests_one_pending
+	ON document_rag_requests (document_id)
+	WHERE status = 'PENDING';
+
 
 CREATE TABLE notifications (
 	notification_id UUID,

@@ -50,8 +50,10 @@ public class DocumentController {
 
     @GetMapping
     @PreAuthorize("hasAnyRole('ADVISOR', 'ADMIN')")
-    public ResponseEntity<List<DocumentResponse>> getDocuments() {
-        List<DocumentResponse> response = documentService.getDocuments();
+    public ResponseEntity<List<DocumentResponse>> getDocuments(
+            @AuthenticationPrincipal AccountPrincipal principal
+    ) {
+        List<DocumentResponse> response = documentService.getDocuments(principal.getAccountId());
         return ResponseEntity.ok(response);
     }
 

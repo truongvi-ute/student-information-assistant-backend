@@ -3,6 +3,8 @@ package vn.hcmute.edu.sia.service;
 import java.io.IOException;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.springframework.dao.DataIntegrityViolationException;
+import vn.hcmute.edu.sia.dto.request.CreateDocumentUpdateRequest;
 import vn.hcmute.edu.sia.enums.DocumentLifecycleStatus;
 import vn.hcmute.edu.sia.enums.RagStatus;
 import vn.hcmute.edu.sia.exception.DocumentStorageException;
@@ -272,9 +274,12 @@ class DocumentRagRequestServiceImplTest {
         prepareAdmin();
         DocumentRagRequest request = new DocumentRagRequest(document, advisor);
         when(requestRepository.findByIdForUpdate(requestId)).thenReturn(Optional.of(request));
+        when(document.getId()).thenReturn(documentId);
+        when(documentRepository.findByIdForUpdate(documentId)).thenReturn(Optional.of(document));
         service.rejectRequest(adminId, requestId, "Incomplete");
         assertThat(request.getStatus()).isEqualTo(DocumentRequestStatus.REJECTED);
         assertThat(request.getRejectionReason()).isEqualTo("Incomplete");
+        verify(documentRepository).findByIdForUpdate(documentId);
     }
 
     @Test
@@ -472,5 +477,147 @@ class DocumentRagRequestServiceImplTest {
         assertThatThrownBy(() -> service.approveRequest(adminId, requestId))
                 .isInstanceOf(ResponseStatusException.class);
         verifyNoInteractions(aiServiceClient, documentRepository);
+    }
+
+    @Test
+    void createUpdateRequestSavesPendingUpdateWhenActiveAndChanged() {
+        prepareAdvisorDocument();
+        when(document.getLifecycleStatus()).thenReturn(DocumentLifecycleStatus.ACTIVE);
+        when(document.getTitle()).thenReturn("Tên cũ");
+
+        DocumentRagRequest saved = mock(DocumentRagRequest.class);
+        when(saved.getId()).thenReturn(requestId);
+        when(requestRepository.save(any(DocumentRagRequest.class))).thenReturn(saved);
+
+        CreateDocumentUpdateRequest payload = new CreateDocumentUpdateRequest("Tên mới", null, false);
+        UUID createdId = service.createUpdateRequest(advisorId, documentId, payload);
+
+        assertThat(createdId).isEqualTo(requestId);
+        ArgumentCaptor<DocumentRagRequest> captor = ArgumentCaptor.forClass(DocumentRagRequest.class);
+        verify(requestRepository).save(captor.capture());
+        verify(requestRepository).flush();
+        assertThat(captor.getValue().getRequestType()).isEqualTo(DocumentRequestType.UPDATE);
+        assertThat(captor.getValue().getProposedTitle()).isEqualTo("Tên mới");
+        assertThat(captor.getValue().getProposedDescription()).isNull();
+        assertThat(captor.getValue().getProposedAllowDownload()).isFalse();
+    }
+
+    @Test
+    void createUpdateRequestSavesPendingUpdateWhenOnlyClearingDescription() {
+        prepareAdvisorDocument();
+        when(document.getLifecycleStatus()).thenReturn(DocumentLifecycleStatus.ACTIVE);
+        when(document.getTitle()).thenReturn("Tên giữ nguyên");
+        when(document.getDescription()).thenReturn("Mô tả cũ");
+
+        DocumentRagRequest saved = mock(DocumentRagRequest.class);
+        when(saved.getId()).thenReturn(requestId);
+        when(requestRepository.save(any(DocumentRagRequest.class))).thenReturn(saved);
+
+        CreateDocumentUpdateRequest payload = new CreateDocumentUpdateRequest("Tên giữ nguyên", null, true);
+        UUID createdId = service.createUpdateRequest(advisorId, documentId, payload);
+
+        assertThat(createdId).isEqualTo(requestId);
+        ArgumentCaptor<DocumentRagRequest> captor = ArgumentCaptor.forClass(DocumentRagRequest.class);
+        verify(requestRepository).save(captor.capture());
+        assertThat(captor.getValue().getProposedDescription()).isNull();
+    }
+
+    @Test
+    void createUpdateRequestRejectsUnchangedPayloadWithBadRequest() {
+        prepareAdvisorDocument();
+        when(document.getLifecycleStatus()).thenReturn(DocumentLifecycleStatus.ACTIVE);
+        when(document.getTitle()).thenReturn("Tên cũ");
+        when(document.getDescription()).thenReturn(null);
+        when(document.isAllowDownload()).thenReturn(true);
+
+        CreateDocumentUpdateRequest payload = new CreateDocumentUpdateRequest("  Tên cũ ", "   ", true);
+
+        assertThatThrownBy(() -> service.createUpdateRequest(advisorId, documentId, payload))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                .isEqualTo(HttpStatus.BAD_REQUEST);
+        verify(requestRepository, never()).save(any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = DocumentLifecycleStatus.class, names = {"DRAFT", "ARCHIVED"})
+    void createUpdateAndDeleteRejectNonActiveDocument(DocumentLifecycleStatus status) {
+        prepareAdvisorDocument();
+        when(document.getLifecycleStatus()).thenReturn(status);
+
+        CreateDocumentUpdateRequest updatePayload = new CreateDocumentUpdateRequest("Mới", "Mô tả", true);
+        assertThatThrownBy(() -> service.createUpdateRequest(advisorId, documentId, updatePayload))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+        assertThatThrownBy(() -> service.createDeleteRequest(advisorId, documentId))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+        verify(requestRepository, never()).save(any());
+    }
+
+    @Test
+    void createDeleteRequestMapsOnePendingUniqueConstraintToConflict() {
+        prepareAdvisorDocument();
+        when(document.getLifecycleStatus()).thenReturn(DocumentLifecycleStatus.ACTIVE);
+        when(requestRepository.save(any(DocumentRagRequest.class)))
+                .thenThrow(new DataIntegrityViolationException(
+                        "duplicate key value violates unique constraint \"uq_document_rag_requests_one_pending\""
+                ));
+
+        assertThatThrownBy(() -> service.createDeleteRequest(advisorId, documentId))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void createDeleteRequestRethrowsUnrelatedDataIntegrityViolation() {
+        prepareAdvisorDocument();
+        when(document.getLifecycleStatus()).thenReturn(DocumentLifecycleStatus.ACTIVE);
+        when(requestRepository.save(any(DocumentRagRequest.class)))
+                .thenThrow(new DataIntegrityViolationException("fk_document_rag_requests_document_id violation"));
+
+        assertThatThrownBy(() -> service.createDeleteRequest(advisorId, documentId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void adminApprovesUpdateRequestAppliesMetadataWithoutCallingAi() {
+        prepareAdmin();
+        when(document.getId()).thenReturn(documentId);
+        when(document.getLifecycleStatus()).thenReturn(DocumentLifecycleStatus.ACTIVE);
+        when(documentRepository.findByIdForUpdate(documentId)).thenReturn(Optional.of(document));
+
+        DocumentRagRequest updateReq = DocumentRagRequest.createUpdate(
+                document, advisor, "Tên mới", null, false
+        );
+        when(requestRepository.findByIdForUpdate(requestId)).thenReturn(Optional.of(updateReq));
+
+        service.approveRequest(adminId, requestId);
+
+        assertThat(updateReq.getStatus()).isEqualTo(DocumentRequestStatus.APPROVED);
+        assertThat(updateReq.getReviewedByAdmin()).isSameAs(admin);
+        verify(document).applyApprovedUpdate("Tên mới", null, false);
+        verifyNoInteractions(aiServiceClient);
+    }
+
+    @Test
+    void adminApprovesDeleteRequestArchivesDocumentWithoutCallingAi() {
+        prepareAdmin();
+        when(document.getId()).thenReturn(documentId);
+        when(document.getLifecycleStatus()).thenReturn(DocumentLifecycleStatus.ACTIVE);
+        when(documentRepository.findByIdForUpdate(documentId)).thenReturn(Optional.of(document));
+
+        DocumentRagRequest deleteReq = DocumentRagRequest.createDelete(document, advisor);
+        when(requestRepository.findByIdForUpdate(requestId)).thenReturn(Optional.of(deleteReq));
+
+        service.approveRequest(adminId, requestId);
+
+        assertThat(deleteReq.getStatus()).isEqualTo(DocumentRequestStatus.APPROVED);
+        assertThat(deleteReq.getReviewedByAdmin()).isSameAs(admin);
+        verify(document).archive();
+        verifyNoInteractions(aiServiceClient);
     }
 }

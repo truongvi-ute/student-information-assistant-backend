@@ -13,7 +13,7 @@ public interface DocumentService {
 
     DocumentUploadResponse uploadDocument(UUID uploaderId, UploadDocumentRequest request);
 
-    List<DocumentResponse> getDocuments();
+    List<DocumentResponse> getDocuments(UUID requesterId);
 
     DocumentContentResponse getDocumentContent(UUID requesterId, UUID documentId);
 

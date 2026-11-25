@@ -17,8 +17,25 @@ import jakarta.persistence.LockModeType;
 public interface DocumentRagRequestRepository
         extends JpaRepository<DocumentRagRequest, UUID> {
 
-    List<DocumentRagRequest> findByRequestedByAdvisorOrderByCreatedAtDesc(Account advisor);
-    List<DocumentRagRequest> findByStatusOrderByCreatedAtDesc(DocumentRequestStatus status);
+    @Query("""
+            SELECT r FROM DocumentRagRequest r
+            JOIN FETCH r.document
+            JOIN FETCH r.requestedByAdvisor
+            LEFT JOIN FETCH r.reviewedByAdmin
+            WHERE r.requestedByAdvisor = :advisor
+            ORDER BY r.createdAt DESC
+            """)
+    List<DocumentRagRequest> findByRequestedByAdvisorOrderByCreatedAtDesc(@Param("advisor") Account advisor);
+
+    @Query("""
+            SELECT r FROM DocumentRagRequest r
+            JOIN FETCH r.document
+            JOIN FETCH r.requestedByAdvisor
+            LEFT JOIN FETCH r.reviewedByAdmin
+            WHERE r.status = :status
+            ORDER BY r.createdAt DESC
+            """)
+    List<DocumentRagRequest> findByStatusOrderByCreatedAtDesc(@Param("status") DocumentRequestStatus status);
     boolean existsByDocumentAndStatus(Document document, DocumentRequestStatus status);
     boolean existsByDocumentAndRequestTypeAndStatusIn(
             Document document,

@@ -36,12 +36,17 @@ import vn.hcmute.edu.sia.repository.DocumentRepository;
 import vn.hcmute.edu.sia.service.AiServiceClient;
 import vn.hcmute.edu.sia.service.DocumentRagRequestService;
 import vn.hcmute.edu.sia.service.DocumentRagStatusService;
+import java.util.Locale;
+import java.util.Objects;
+import org.springframework.dao.DataIntegrityViolationException;
+import vn.hcmute.edu.sia.dto.request.CreateDocumentUpdateRequest;
 
 @Service
 @RequiredArgsConstructor
 public class DocumentRagRequestServiceImpl implements DocumentRagRequestService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DocumentRagRequestServiceImpl.class);
+    private static final String ONE_PENDING_INDEX_NAME = "uq_document_rag_requests_one_pending";
 
     private final AccountRepository accountRepository;
     private final DocumentRepository documentRepository;
@@ -87,7 +92,59 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
         if (hasExistingRequest) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This document already has a pending or approved add request");
         }
-        return requestRepository.save(request).getId();
+        return savePendingRequest(request);
+    }
+
+    @Override
+    @Transactional
+    public UUID createUpdateRequest(
+            UUID advisorId,
+            UUID documentId,
+            CreateDocumentUpdateRequest updateRequest
+    ) {
+        Account advisor = requireActiveAdvisor(advisorId);
+        validateUpdateRequestPayload(updateRequest);
+
+        Document document = requireOwnedLockedDocument(advisorId, documentId);
+        requireActiveDocument(document, "Only active documents are eligible for UPDATE");
+
+        String normalizedTitle = updateRequest.getTitle().trim();
+        String normalizedDescription = normalizeOptionalText(updateRequest.getDescription());
+        Boolean proposedAllowDownload = updateRequest.getAllowDownload();
+
+        boolean unchanged = Objects.equals(normalizedTitle, document.getTitle())
+                && Objects.equals(normalizedDescription, normalizeOptionalText(document.getDescription()))
+                && Objects.equals(proposedAllowDownload, document.isAllowDownload());
+        if (unchanged) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Update request must change at least one field");
+        }
+
+        if (requestRepository.existsByDocumentAndStatus(document, DocumentRequestStatus.PENDING)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This document already has a pending request");
+        }
+
+        return savePendingRequest(DocumentRagRequest.createUpdate(
+                document,
+                advisor,
+                normalizedTitle,
+                normalizedDescription,
+                proposedAllowDownload
+        ));
+    }
+
+    @Override
+    @Transactional
+    public UUID createDeleteRequest(UUID advisorId, UUID documentId) {
+        Account advisor = requireActiveAdvisor(advisorId);
+        Document document = requireOwnedLockedDocument(advisorId, documentId);
+
+        requireActiveDocument(document, "Only active documents are eligible for DELETE");
+
+        if (requestRepository.existsByDocumentAndStatus(document, DocumentRequestStatus.PENDING)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This document already has a pending request");
+        }
+
+        return savePendingRequest(DocumentRagRequest.createDelete(document, advisor));
     }
 
     @Override
@@ -128,22 +185,39 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
         DocumentRagRequest request = requestRepository.findByIdForUpdate(requestId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document request was not found"));
 
-        requirePendingAddRequest(request);
+        if (request.getStatus() != DocumentRequestStatus.PENDING) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Only pending requests can be processed");
+        }
         Document lockedDocument = documentRepository.findByIdForUpdate(request.getDocument().getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document was not found"));
-        requireAddEligibleDocument(lockedDocument);
-        request.approve(admin);
 
-        if (request.getRequestType() == DocumentRequestType.ADD) {
-            Document document = lockedDocument;
-            document.startRagProcessing();
-            scheduleStorageIngestion(
-                    document.getId(),
-                    document.getStoragePath(),
-                    document.getOriginalFilename(),
-                    document.getTitle(),
-                    document.getDescription()
-            );
+        switch (request.getRequestType()) {
+            case ADD -> {
+                requireAddEligibleDocument(lockedDocument);
+                request.approve(admin);
+                lockedDocument.startRagProcessing();
+                scheduleStorageIngestion(
+                        lockedDocument.getId(),
+                        lockedDocument.getStoragePath(),
+                        lockedDocument.getOriginalFilename(),
+                        lockedDocument.getTitle(),
+                        lockedDocument.getDescription()
+                );
+            }
+            case UPDATE -> {
+                requireActiveDocument(lockedDocument, "Only active documents are eligible for UPDATE");
+                request.approve(admin);
+                lockedDocument.applyApprovedUpdate(
+                        request.getProposedTitle(),
+                        request.getProposedDescription(),
+                        request.getProposedAllowDownload()
+                );
+            }
+            case DELETE -> {
+                requireActiveDocument(lockedDocument, "Only active documents are eligible for DELETE");
+                request.approve(admin);
+                lockedDocument.archive();
+            }
         }
     }
 
@@ -159,6 +233,16 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
 
         DocumentRagRequest request = requestRepository.findByIdForUpdate(requestId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document request was not found"));
+
+        if (request.getStatus() != DocumentRequestStatus.PENDING) {
+            throw new IllegalStateException("Only pending requests can be reviewed");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("Rejection reason must not be blank");
+        }
+        // Lock Document in the same request -> document order as approveRequest.
+        documentRepository.findByIdForUpdate(request.getDocument().getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document was not found"));
 
         request.reject(admin, reason);
     }
@@ -202,6 +286,88 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
                 || document.getRagStatus() != RagStatus.NOT_INDEXED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Only unprocessed draft documents are eligible for ADD");
         }
+    }
+
+    private void requireActiveDocument(Document document, String errorMessage) {
+        if (document.getLifecycleStatus() != DocumentLifecycleStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, errorMessage);
+        }
+    }
+
+    private Account requireActiveAdvisor(UUID advisorId) {
+        Account advisor = accountRepository.findById(advisorId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account was not found"));
+
+        if (advisor.getRole() != AccountRole.ADVISOR || advisor.getAccessStatus() != AccountAccessStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "An active advisor account is required");
+        }
+        return advisor;
+    }
+
+    private Document requireOwnedLockedDocument(UUID advisorId, UUID documentId) {
+        Document document = documentRepository.findByIdForUpdate(documentId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document was not found"));
+
+        if (!document.getUploadedBy().getId().equals(advisorId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You can only submit requests for your own documents");
+        }
+        return document;
+    }
+
+    private UUID savePendingRequest(DocumentRagRequest request) {
+        try {
+            DocumentRagRequest saved = requestRepository.save(request);
+            requestRepository.flush();
+            return saved.getId();
+        } catch (DataIntegrityViolationException exception) {
+            if (isOnePendingConstraintViolation(exception)) {
+                throw new ResponseStatusException(
+                        HttpStatus.CONFLICT,
+                        "This document already has a pending request",
+                        exception
+                );
+            }
+            throw exception;
+        }
+    }
+
+    private boolean isOnePendingConstraintViolation(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null
+                    && message.toLowerCase(Locale.ROOT)
+                            .contains(ONE_PENDING_INDEX_NAME)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private void validateUpdateRequestPayload(CreateDocumentUpdateRequest request) {
+        if (request == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Update request body is required");
+        }
+        if (request.getTitle() == null || request.getTitle().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Title must not be blank");
+        }
+        if (request.getTitle().trim().length() > 255) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Title must not exceed 255 characters");
+        }
+        if (!request.isDescriptionPresent()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Description field must be provided");
+        }
+        if (request.getAllowDownload() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "allowDownload must not be null");
+        }
+    }
+
+    private String normalizeOptionalText(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
     }
 
     private void scheduleStorageIngestion(

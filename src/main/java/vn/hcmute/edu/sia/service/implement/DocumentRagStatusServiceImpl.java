@@ -3,12 +3,15 @@ package vn.hcmute.edu.sia.service.implement;
 import java.util.UUID;
 
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import vn.hcmute.edu.sia.entity.Document;
+import vn.hcmute.edu.sia.enums.DocumentLifecycleStatus;
 import vn.hcmute.edu.sia.repository.DocumentRepository;
 import vn.hcmute.edu.sia.service.DocumentRagStatusService;
 
@@ -16,12 +19,18 @@ import vn.hcmute.edu.sia.service.DocumentRagStatusService;
 @RequiredArgsConstructor
 public class DocumentRagStatusServiceImpl implements DocumentRagStatusService {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(DocumentRagStatusServiceImpl.class);
+
     private final DocumentRepository documentRepository;
 
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markReady(UUID documentId) {
         Document document = findDocumentForUpdate(documentId);
+        if (document.getLifecycleStatus() == DocumentLifecycleStatus.ARCHIVED) {
+            LOGGER.warn("Ignoring late READY callback for archived document {}", documentId);
+            return;
+        }
         document.completeRagIndexing();
     }
 
@@ -29,6 +38,10 @@ public class DocumentRagStatusServiceImpl implements DocumentRagStatusService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markFailed(UUID documentId) {
         Document document = findDocumentForUpdate(documentId);
+        if (document.getLifecycleStatus() == DocumentLifecycleStatus.ARCHIVED) {
+            LOGGER.warn("Ignoring late FAILED callback for archived document {}", documentId);
+            return;
+        }
         document.failRagIndexing();
     }
 

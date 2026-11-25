@@ -79,6 +79,72 @@ public class DocumentRagRequest {
         this.status = DocumentRequestStatus.PENDING;
     }
 
+    private DocumentRagRequest(
+            Document document,
+            Account requestedByAdvisor,
+            DocumentRequestType requestType,
+            String proposedTitle,
+            String proposedDescription,
+            Boolean proposedAllowDownload
+    ) {
+        this.document = Objects.requireNonNull(document, "Document must not be null");
+        this.requestedByAdvisor = Objects.requireNonNull(
+                requestedByAdvisor, "Advisor must not be null"
+        );
+        this.requestType = Objects.requireNonNull(requestType, "Request type must not be null");
+        this.status = DocumentRequestStatus.PENDING;
+        this.proposedTitle = proposedTitle;
+        this.proposedDescription = proposedDescription;
+        this.proposedAllowDownload = proposedAllowDownload;
+    }
+
+    public static DocumentRagRequest createAdd(Document document, Account requestedByAdvisor) {
+        return new DocumentRagRequest(document, requestedByAdvisor);
+    }
+
+    public static DocumentRagRequest createUpdate(
+            Document document,
+            Account requestedByAdvisor,
+            String proposedTitle,
+            String proposedDescription,
+            Boolean proposedAllowDownload
+    ) {
+        Objects.requireNonNull(document, "Document must not be null");
+        Objects.requireNonNull(requestedByAdvisor, "Advisor must not be null");
+        if (proposedTitle == null || proposedTitle.isBlank()) {
+            throw new IllegalArgumentException("Title must not be blank");
+        }
+        String normalizedTitle = proposedTitle.trim();
+        if (normalizedTitle.length() > 255) {
+            throw new IllegalArgumentException("Title must not exceed 255 characters");
+        }
+        if (proposedAllowDownload == null) {
+            throw new IllegalArgumentException("Allow download must not be null");
+        }
+        String normalizedDescription = (proposedDescription == null || proposedDescription.isBlank())
+                ? null
+                : proposedDescription.trim();
+        return new DocumentRagRequest(
+                document,
+                requestedByAdvisor,
+                DocumentRequestType.UPDATE,
+                normalizedTitle,
+                normalizedDescription,
+                proposedAllowDownload
+        );
+    }
+
+    public static DocumentRagRequest createDelete(Document document, Account requestedByAdvisor) {
+        return new DocumentRagRequest(
+                document,
+                requestedByAdvisor,
+                DocumentRequestType.DELETE,
+                null,
+                null,
+                null
+        );
+    }
+
     public void approve(Account admin) {
         if (status != DocumentRequestStatus.PENDING) {
             throw new IllegalStateException("Only pending requests can be reviewed");

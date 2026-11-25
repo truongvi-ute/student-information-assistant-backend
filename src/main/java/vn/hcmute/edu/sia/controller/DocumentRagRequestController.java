@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import vn.hcmute.edu.sia.security.AccountPrincipal;
 import vn.hcmute.edu.sia.service.DocumentRagRequestService;
+import vn.hcmute.edu.sia.dto.request.CreateDocumentUpdateRequest;
 import vn.hcmute.edu.sia.dto.response.DocumentRagRequestResponse;
 import vn.hcmute.edu.sia.dto.request.RejectDocumentRagRequest;
 
@@ -38,6 +39,27 @@ public class DocumentRagRequestController {
     ) {
         UUID requestId = requestService.createAddRequest(principal.getAccountId(), documentId);
 
+        return ResponseEntity.status(HttpStatus.CREATED).body(requestId);
+    }
+
+    @PostMapping("/documents/{documentId}/update")
+    @PreAuthorize("hasRole('ADVISOR')")
+    public ResponseEntity<UUID> createUpdateRequest(
+            @AuthenticationPrincipal AccountPrincipal principal,
+            @PathVariable UUID documentId,
+            @Valid @RequestBody CreateDocumentUpdateRequest body
+    ) {
+        UUID requestId = requestService.createUpdateRequest(principal.getAccountId(), documentId, body);
+        return ResponseEntity.status(HttpStatus.CREATED).body(requestId);
+    }
+
+    @PostMapping("/documents/{documentId}/delete")
+    @PreAuthorize("hasRole('ADVISOR')")
+    public ResponseEntity<UUID> createDeleteRequest(
+            @AuthenticationPrincipal AccountPrincipal principal,
+            @PathVariable UUID documentId
+    ) {
+        UUID requestId = requestService.createDeleteRequest(principal.getAccountId(), documentId);
         return ResponseEntity.status(HttpStatus.CREATED).body(requestId);
     }
 

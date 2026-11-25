@@ -16,6 +16,15 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
     @Query("SELECT d FROM Document d JOIN FETCH d.uploadedBy ORDER BY d.createdAt DESC")
     List<Document> findAllWithUploaderOrderByCreatedAtDesc();
 
+    @Query("""
+            SELECT d FROM Document d
+            JOIN FETCH d.uploadedBy u
+            WHERE d.lifecycleStatus = vn.hcmute.edu.sia.enums.DocumentLifecycleStatus.ACTIVE
+               OR u.id = :advisorId
+            ORDER BY d.createdAt DESC
+            """)
+    List<Document> findVisibleForAdvisorOrderByCreatedAtDesc(@Param("advisorId") UUID advisorId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT d FROM Document d WHERE d.id = :id")
     Optional<Document> findByIdForUpdate(@Param("id") UUID id);

@@ -132,15 +132,15 @@ public class Document {
     }
 
     public void applyApprovedUpdate(String title, String description, Boolean allowDownload) {
-        if (title != null && !title.isBlank()) {
-            this.title = requireText(title, "Title", 255);
+        if (this.lifecycleStatus != DocumentLifecycleStatus.ACTIVE) {
+            throw new IllegalStateException("Only active documents can be updated");
         }
-        if (description != null) {
-            this.description = normalizeOptionalText(description);
+        if (allowDownload == null) {
+            throw new IllegalArgumentException("Allow download must not be null");
         }
-        if (allowDownload != null) {
-            this.allowDownload = allowDownload;
-        }
+        this.title = requireText(title, "Title", 255);
+        this.description = normalizeOptionalText(description);
+        this.allowDownload = allowDownload;
     }
 
     public void startRagProcessing() {
@@ -148,11 +148,18 @@ public class Document {
     }
 
     public void completeRagIndexing() {
+        // ARCHIVED is terminal: prevent late/duplicate RAG callbacks from reactivating a retired document
+        if (this.lifecycleStatus == DocumentLifecycleStatus.ARCHIVED) {
+            return;
+        }
         this.ragStatus = RagStatus.READY;
         this.lifecycleStatus = DocumentLifecycleStatus.ACTIVE;
     }
 
     public void failRagIndexing() {
+        if (this.lifecycleStatus == DocumentLifecycleStatus.ARCHIVED) {
+            return;
+        }
         this.ragStatus = RagStatus.FAILED;
     }
 

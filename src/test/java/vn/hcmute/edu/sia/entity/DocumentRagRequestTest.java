@@ -90,4 +90,28 @@ class DocumentRagRequestTest {
         assertThat(request.getStatus()).isEqualTo(DocumentRequestStatus.REJECTED);
         assertThat(request.getRejectionReason()).isEqualTo("Reason");
     }
+
+    @Test
+    void createUpdateNormalizesTitleAndClearsBlankDescription() {
+        DocumentRagRequest updateReq = DocumentRagRequest.createUpdate(
+                document, advisor, "  Tên đề xuất  ", "   ", false
+        );
+
+        assertThat(updateReq.getRequestType()).isEqualTo(DocumentRequestType.UPDATE);
+        assertThat(updateReq.getStatus()).isEqualTo(DocumentRequestStatus.PENDING);
+        assertThat(updateReq.getProposedTitle()).isEqualTo("Tên đề xuất");
+        assertThat(updateReq.getProposedDescription()).isNull();
+        assertThat(updateReq.getProposedAllowDownload()).isFalse();
+    }
+
+    @Test
+    void createDeleteStartsPendingWithNullProposedFields() {
+        DocumentRagRequest deleteReq = DocumentRagRequest.createDelete(document, advisor);
+
+        assertThat(deleteReq.getRequestType()).isEqualTo(DocumentRequestType.DELETE);
+        assertThat(deleteReq.getStatus()).isEqualTo(DocumentRequestStatus.PENDING);
+        assertThat(deleteReq.getProposedTitle()).isNull();
+        assertThat(deleteReq.getProposedDescription()).isNull();
+        assertThat(deleteReq.getProposedAllowDownload()).isNull();
+    }
 }
