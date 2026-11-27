@@ -384,6 +384,103 @@ class AiChatbotServiceImplTest {
         );
     }
 
+    @Test
+    @DisplayName("Truyền danh sách documentId ACTIVE/READY sang AI-Service trước khi gọi LLM và loại citation đã ARCHIVED")
+    void askQuestion_ForwardsRagEligibleDocumentIdsAndExcludesArchivedCitations() throws Exception {
+        AIConversation conversation = new AIConversation(studentId, "Quy chế", null);
+        UUID activeDocId = UUID.randomUUID();
+        UUID archivedDocId = UUID.randomUUID();
+
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(activeStudent));
+        when(conversationRepository.findByIdAndStudentIdAndConversationTypeAndDeletedAtIsNull(
+                conversation.getId(), studentId.toString(), "AI"
+        )).thenReturn(Optional.of(conversation));
+        when(documentRepository.findRagEligibleDocumentIds()).thenReturn(List.of(activeDocId));
+
+        Document archivedDoc = new Document(
+                activeAdvisor,
+                "Quy chế cũ đã thu hồi",
+                null,
+                true,
+                "old_qc.pdf",
+                "documents/old_qc.pdf",
+                "application/pdf",
+                1024L,
+                "c".repeat(64)
+        );
+        setField(archivedDoc, "id", archivedDocId);
+        archivedDoc.completeRagIndexing();
+        archivedDoc.archive();
+        when(documentRepository.findAllById(anyCollection())).thenReturn(List.of(archivedDoc));
+
+        AiServiceSourceCitation staleCitation = new AiServiceSourceCitation(
+                archivedDocId.toString(),
+                "old_qc.pdf",
+                1,
+                0,
+                0,
+                20,
+                0.88,
+                "Trích dẫn cũ",
+                "Nội dung cũ"
+        );
+        when(aiServiceClient.chat(any(AiServiceChatRequest.class))).thenReturn(
+                new AiServiceChatResponse("Hỏi quy chế?", "Trả lời mới.", List.of(staleCitation))
+        );
+
+        AiChatbotTurnResponse turn = aiChatbotService.askQuestion(
+                studentId,
+                conversation.getId(),
+                new SendAiMessageRequest("Hỏi quy chế?", 5, null)
+        );
+
+        ArgumentCaptor<AiServiceChatRequest> requestCaptor = ArgumentCaptor.forClass(AiServiceChatRequest.class);
+        verify(aiServiceClient).chat(requestCaptor.capture());
+        assertThat(requestCaptor.getValue().allowedDocumentIds()).containsExactly(activeDocId.toString());
+        assertThat(turn.aiMessage().citations()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Hội thoại cũ vẫn giữ nguyên hiển thị thông tin citation của tài liệu đã ARCHIVED")
+    void getMessages_ArchivedDocumentCitationRemainsVisibleInHistory() throws Exception {
+        AIConversation conversation = new AIConversation(studentId, "Lịch sử cũ", null);
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(activeStudent));
+        when(conversationRepository.findByIdAndStudentIdAndConversationTypeAndDeletedAtIsNull(
+                conversation.getId(), studentId.toString(), "AI"
+        )).thenReturn(Optional.of(conversation));
+
+        Document archivedDoc = new Document(
+                activeAdvisor,
+                "Quy chế học vụ 2024 (đã lưu trữ)",
+                null,
+                false,
+                "qc_2024.pdf",
+                "documents/qc_2024.pdf",
+                "application/pdf",
+                1024L,
+                "d".repeat(64)
+        );
+        setField(archivedDoc, "id", documentId);
+        archivedDoc.completeRagIndexing();
+        archivedDoc.archive();
+        when(documentRepository.findAllById(anyCollection())).thenReturn(List.of(archivedDoc));
+
+        Citation oldCitation = new Citation(documentId, "qc_2024.pdf", 4, "chunk_2", "Trích dẫn đã lưu", 0.91);
+        AIMessage aiMsg = new AIMessage(conversation.getId(), "Trả lời trước đây", List.of(oldCitation));
+        when(messageRepository.findByConversationIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(
+                eq(conversation.getId()), any(Pageable.class)
+        )).thenReturn(new SliceImpl<>(List.of(aiMsg), Pageable.ofSize(30), false));
+
+        AiChatbotHistoryResponse history = aiChatbotService.getMessages(studentId, conversation.getId(), 0, 30);
+
+        assertThat(history.messages()).hasSize(1);
+        assertThat(history.messages().getFirst().citations()).hasSize(1);
+        assertThat(history.messages().getFirst().citations().getFirst().sourceTitle())
+                .isEqualTo("Quy chế học vụ 2024 (đã lưu trữ)");
+        assertThat(history.messages().getFirst().citations().getFirst().quotedContent())
+                .isEqualTo("Trích dẫn đã lưu");
+    }
+
     private static void setField(Object target, String fieldName, Object value) throws Exception {
         Field field = target.getClass().getDeclaredField(fieldName);
         field.setAccessible(true);

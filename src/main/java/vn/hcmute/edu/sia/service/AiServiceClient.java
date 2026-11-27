@@ -9,4 +9,6 @@ public interface AiServiceClient {
     AiServiceChatResponse chat(AiServiceChatRequest request);
 
     AiServiceIngestResponse ingestFromStorage(AiServiceIngestRequest request);
+
+    void deleteDocumentVectors(String documentId);
 }

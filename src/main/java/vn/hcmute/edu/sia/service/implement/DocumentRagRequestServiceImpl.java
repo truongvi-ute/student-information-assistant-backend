@@ -177,6 +177,7 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
                 requireActiveDocument(lockedDocument, "Only active documents are eligible for DELETE");
                 request.approve(admin);
                 lockedDocument.archive();
+                scheduleVectorDeletion(lockedDocument.getId());
             }
         }
     }
@@ -390,6 +391,35 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
                     documentRagStatusService.markFailed(documentId, attemptId);
                 }
             }
+        }
+    }
+
+    private void scheduleVectorDeletion(UUID documentId) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    triggerVectorDeletion(documentId);
+                }
+            });
+            return;
+        }
+        triggerVectorDeletion(documentId);
+    }
+
+    private void triggerVectorDeletion(UUID documentId) {
+        if (aiServiceClient == null || documentId == null) {
+            return;
+        }
+
+        try {
+            aiServiceClient.deleteDocumentVectors(documentId.toString());
+        } catch (RuntimeException exception) {
+            LOGGER.error(
+                    "Failed to delete Qdrant vectors for archived document {}. Archived document remains disabled for RAG.",
+                    documentId,
+                    exception
+            );
         }
     }
 }

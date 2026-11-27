@@ -43,6 +43,7 @@ import vn.hcmute.edu.sia.repository.DocumentRepository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(PostgresTestSchemaExtension.class)
@@ -361,11 +362,14 @@ class DocumentRagRequestPostgresIntegrationTest {
     @Test
     void deleteWorkflowArchivesDocumentBlocksFileEndpointsAndIgnoresLateCallbacks() throws Exception {
         Document doc = createActiveDocument("Quy chế thu hồi", "Mô tả", true);
+        Document remainingActiveDoc = createActiveDocument("Quy chế còn hiệu lực", "Mô tả", true);
         when(documentStorageService.loadUtf8Text("extracted/" + doc.getId() + ".md")).thenReturn("# Noi dung");
         when(documentStorageService.loadBytes(doc.getStoragePath())).thenReturn("pdf-data".getBytes(StandardCharsets.UTF_8));
 
         UUID deleteReqId = requestService.createDeleteRequest(advisor.getId(), doc.getId());
 
+        assertThat(documentRepository.findRagEligibleDocumentIds())
+                .containsExactlyInAnyOrder(doc.getId(), remainingActiveDoc.getId());
         assertThat(documentService.getDocumentContent(student.getId(), doc.getId()).markdownContent()).isEqualTo("# Noi dung");
         assertThat(documentService.previewDocument(student.getId(), doc.getId()).content()).isNotEmpty();
         assertThat(documentService.downloadDocument(student.getId(), doc.getId()).content()).isNotEmpty();
@@ -376,6 +380,9 @@ class DocumentRagRequestPostgresIntegrationTest {
         assertThat(archived.getLifecycleStatus()).isEqualTo(DocumentLifecycleStatus.ARCHIVED);
         assertThat(archived.getRagStatus()).isEqualTo(RagStatus.DISABLED);
         assertThat(archived.getArchivedAt()).isNotNull();
+        verify(aiServiceClient).deleteDocumentVectors(doc.getId().toString());
+        assertThat(documentRepository.findRagEligibleDocumentIds())
+                .containsExactly(remainingActiveDoc.getId());
 
         List<DocumentRagRequestResponse> history = requestService.getMyRequests(advisor.getId());
         assertThat(history).hasSize(1);

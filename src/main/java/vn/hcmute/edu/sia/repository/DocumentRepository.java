@@ -30,4 +30,11 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
     Optional<Document> findByIdForUpdate(@Param("id") UUID id);
 
     List<Document> findByOriginalFilenameIn(Collection<String> originalFilenames);
+
+    @Query("""
+            SELECT d.id FROM Document d
+            WHERE d.lifecycleStatus = vn.hcmute.edu.sia.enums.DocumentLifecycleStatus.ACTIVE
+              AND d.ragStatus = vn.hcmute.edu.sia.enums.RagStatus.READY
+            """)
+    List<UUID> findRagEligibleDocumentIds();
 }

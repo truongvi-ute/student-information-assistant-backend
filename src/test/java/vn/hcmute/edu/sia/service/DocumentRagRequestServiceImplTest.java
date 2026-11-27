@@ -594,7 +594,7 @@ class DocumentRagRequestServiceImplTest {
     }
 
     @Test
-    void adminApprovesDeleteRequestArchivesDocumentWithoutCallingAi() {
+    void adminApprovesDeleteRequestArchivesDocumentAndDeletesVectors() {
         prepareAdmin();
         when(document.getId()).thenReturn(documentId);
         when(document.isEligibleForRag()).thenReturn(true);
@@ -608,6 +608,25 @@ class DocumentRagRequestServiceImplTest {
         assertThat(deleteReq.getStatus()).isEqualTo(DocumentRequestStatus.APPROVED);
         assertThat(deleteReq.getReviewedByAdmin()).isSameAs(admin);
         verify(document).archive();
-        verifyNoInteractions(aiServiceClient);
+        verify(aiServiceClient).deleteDocumentVectors(documentId.toString());
+    }
+
+    @Test
+    void adminApprovesDeleteRequestStillArchivesWhenVectorDeletionFails() {
+        prepareAdmin();
+        when(document.getId()).thenReturn(documentId);
+        when(document.isEligibleForRag()).thenReturn(true);
+        when(documentRepository.findByIdForUpdate(documentId)).thenReturn(Optional.of(document));
+        doThrow(new AiServiceException(HttpStatus.BAD_GATEWAY, "Qdrant unreachable"))
+                .when(aiServiceClient).deleteDocumentVectors(documentId.toString());
+
+        DocumentRagRequest deleteReq = DocumentRagRequest.createDelete(document, advisor);
+        when(requestRepository.findByIdForUpdate(requestId)).thenReturn(Optional.of(deleteReq));
+
+        service.approveRequest(adminId, requestId);
+
+        assertThat(deleteReq.getStatus()).isEqualTo(DocumentRequestStatus.APPROVED);
+        verify(document).archive();
+        verify(aiServiceClient).deleteDocumentVectors(documentId.toString());
     }
 }
