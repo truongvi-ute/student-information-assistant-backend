@@ -81,4 +81,21 @@ class DocumentRagStatusServiceImplTest {
         assertThat(document.getLifecycleStatus()).isEqualTo(DocumentLifecycleStatus.ACTIVE);
         assertThat(document.getRagStatus()).isEqualTo(RagStatus.READY);
     }
+
+    @Test
+    void retryIgnoresCallbacksFromThePreviousAttempt() {
+        document.startRagProcessing();
+        document.failRagIndexing();
+        UUID attempt = document.retryRagProcessing();
+        when(documentRepository.findByIdForUpdate(documentId)).thenReturn(Optional.of(document));
+
+        service.markReady(documentId);
+        service.markFailed(documentId, UUID.randomUUID());
+        assertThat(document.getRagStatus()).isEqualTo(RagStatus.PROCESSING);
+
+        service.markReady(documentId, attempt);
+        service.markFailed(documentId, attempt);
+        assertThat(document.getLifecycleStatus()).isEqualTo(DocumentLifecycleStatus.ACTIVE);
+        assertThat(document.getRagStatus()).isEqualTo(RagStatus.READY);
+    }
 }

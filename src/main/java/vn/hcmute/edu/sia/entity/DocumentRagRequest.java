@@ -31,9 +31,15 @@ public class DocumentRagRequest {
     @Column(name = "document_rag_request_id", nullable = false, updatable = false)
     private UUID id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "document_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "document_id")
     private Document document;
+
+    @Column(name = "deleted_document_id")
+    private UUID deletedDocumentId;
+
+    @Column(name = "deleted_document_title", length = 255)
+    private String deletedDocumentTitle;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "requested_by_advisor_id", nullable = false)

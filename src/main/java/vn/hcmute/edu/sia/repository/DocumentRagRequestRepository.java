@@ -10,6 +10,7 @@ import vn.hcmute.edu.sia.entity.DocumentRagRequest;
 import vn.hcmute.edu.sia.enums.DocumentRequestStatus;
 import vn.hcmute.edu.sia.enums.DocumentRequestType;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import jakarta.persistence.LockModeType;
@@ -19,7 +20,7 @@ public interface DocumentRagRequestRepository
 
     @Query("""
             SELECT r FROM DocumentRagRequest r
-            JOIN FETCH r.document
+            LEFT JOIN FETCH r.document
             JOIN FETCH r.requestedByAdvisor
             LEFT JOIN FETCH r.reviewedByAdmin
             WHERE r.requestedByAdvisor = :advisor
@@ -37,6 +38,16 @@ public interface DocumentRagRequestRepository
             """)
     List<DocumentRagRequest> findByStatusOrderByCreatedAtDesc(@Param("status") DocumentRequestStatus status);
     boolean existsByDocumentAndStatus(Document document, DocumentRequestStatus status);
+
+    @Modifying
+    @Query("""
+            UPDATE DocumentRagRequest r SET r.deletedDocumentId = :documentId,
+                r.deletedDocumentTitle = :title, r.document = null
+            WHERE r.document = :document AND r.status = :status
+            """)
+    void keepDeletedDocumentHistory(@Param("document") Document document,
+                                    @Param("status") DocumentRequestStatus status,
+                                    @Param("documentId") UUID documentId, @Param("title") String title);
     boolean existsByDocumentAndRequestTypeAndStatusIn(
             Document document,
             DocumentRequestType requestType,

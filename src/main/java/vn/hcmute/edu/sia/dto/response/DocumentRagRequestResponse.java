@@ -28,14 +28,15 @@ public record DocumentRagRequestResponse(
         Instant reviewedAt
 ) {
     public static DocumentRagRequestResponse from(DocumentRagRequest request) {
+        var document = request.getDocument();
         return new DocumentRagRequestResponse(
                 request.getId(),
-                request.getDocument().getId(),
-                request.getDocument().getTitle(),
-                request.getDocument().getDescription(),
-                request.getDocument().isAllowDownload(),
-                request.getDocument().getLifecycleStatus(),
-                request.getDocument().getRagStatus(),
+                document != null ? document.getId() : request.getDeletedDocumentId(),
+                document != null ? document.getTitle() : request.getDeletedDocumentTitle(),
+                document != null ? document.getDescription() : null,
+                document != null && document.isAllowDownload(),
+                document != null ? document.getLifecycleStatus() : null,
+                document != null ? document.getRagStatus() : null,
                 request.getRequestedByAdvisor().getFullName(),
                 request.getReviewedByAdmin() != null ? request.getReviewedByAdmin().getFullName() : null,
                 request.getRequestType(),

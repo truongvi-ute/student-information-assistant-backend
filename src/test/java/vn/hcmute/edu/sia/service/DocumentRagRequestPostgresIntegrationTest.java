@@ -194,52 +194,33 @@ class DocumentRagRequestPostgresIntegrationTest {
     }
 
     @Test
-    void updateWorkflowPreservesDocumentUntilApprovedAndClearsDescriptionOnApproval() {
-        Document doc = createActiveDocument("Tên ban đầu", "Mô tả ban đầu", true);
+    void rejectedDraftCanBeEditedAndDeletedWithoutLosingReviewHistory() {
+        Document doc = documentRepository.saveAndFlush(new Document(
+                advisor, "Draft", "Original", true, "file.pdf", "draft/deleted.pdf", "application/pdf", 10, "a".repeat(64)
+        ));
+        var metadata = new CreateDocumentUpdateRequest("Edited", null, false);
+        UUID requestId = requestService.createAddRequest(advisor.getId(), doc.getId());
+        assertThatThrownBy(() -> documentService.updateDraft(advisor.getId(), doc.getId(), metadata))
+                .isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> documentService.deleteDraft(advisor.getId(), doc.getId()))
+                .isInstanceOf(ResponseStatusException.class);
 
-        UUID req1Id = requestService.createUpdateRequest(
-                advisor.getId(),
-                doc.getId(),
-                new CreateDocumentUpdateRequest("Tên mới bị từ chối", null, false)
-        );
+        requestService.rejectRequest(admin.getId(), requestId, "Needs revision");
+        documentService.updateDraft(advisor.getId(), doc.getId(), metadata);
+        Document updated = documentRepository.findById(doc.getId()).orElseThrow();
+        assertThat(updated.getDescription()).isNull();
+        assertThat(updated.isAllowDownload()).isFalse();
 
-        Document whilePending = documentRepository.findById(doc.getId()).orElseThrow();
-        assertThat(whilePending.getTitle()).isEqualTo("Tên ban đầu");
-        assertThat(whilePending.getDescription()).isEqualTo("Mô tả ban đầu");
-        assertThat(whilePending.isAllowDownload()).isTrue();
-
-        List<DocumentRagRequestResponse> pendingList = requestService.getPendingRequests();
-        assertThat(pendingList).hasSize(1);
-        assertThat(pendingList.getFirst().documentTitle()).isEqualTo("Tên ban đầu");
-        assertThat(pendingList.getFirst().currentDescription()).isEqualTo("Mô tả ban đầu");
-        assertThat(pendingList.getFirst().proposedTitle()).isEqualTo("Tên mới bị từ chối");
-        assertThat(pendingList.getFirst().proposedDescription()).isNull();
-        assertThat(pendingList.getFirst().reviewedByName()).isNull();
-
-        requestService.rejectRequest(admin.getId(), req1Id, "Cần giữ mô tả hoặc sửa tên rõ hơn");
-
-        Document afterReject = documentRepository.findById(doc.getId()).orElseThrow();
-        assertThat(afterReject.getTitle()).isEqualTo("Tên ban đầu");
-        assertThat(afterReject.getDescription()).isEqualTo("Mô tả ban đầu");
-        assertThat(afterReject.isAllowDownload()).isTrue();
-
-        UUID req2Id = requestService.createUpdateRequest(
-                advisor.getId(),
-                doc.getId(),
-                new CreateDocumentUpdateRequest("Tên chính thức", null, false)
-        );
-        requestService.approveRequest(admin.getId(), req2Id);
-
-        Document afterApprove = documentRepository.findById(doc.getId()).orElseThrow();
-        assertThat(afterApprove.getTitle()).isEqualTo("Tên chính thức");
-        assertThat(afterApprove.getDescription()).isNull();
-        assertThat(afterApprove.isAllowDownload()).isFalse();
-        assertThat(afterApprove.getLifecycleStatus()).isEqualTo(DocumentLifecycleStatus.ACTIVE);
-        assertThat(afterApprove.getRagStatus()).isEqualTo(RagStatus.READY);
+        documentService.deleteDraft(advisor.getId(), doc.getId());
+        assertThat(documentRepository.findById(doc.getId())).isEmpty();
+        var history = requestService.getMyRequests(advisor.getId()).getFirst();
+        assertThat(history.documentId()).isEqualTo(doc.getId());
+        assertThat(history.documentTitle()).isEqualTo("Edited");
+        assertThat(history.rejectionReason()).isEqualTo("Needs revision");
     }
 
     @Test
-    void concurrentUpdateAndDeleteAllowOnlyOnePendingRequest() throws Exception {
+    void concurrentDeletesAllowOnlyOnePendingRequest() throws Exception {
         Document doc = createActiveDocument("Quy chế gốc", "Mô tả", true);
 
         CountDownLatch ready = new CountDownLatch(2);
@@ -252,11 +233,7 @@ class DocumentRagRequestPostgresIntegrationTest {
                 ready.countDown();
                 try {
                     start.await();
-                    UUID id = requestService.createUpdateRequest(
-                            advisor.getId(),
-                            doc.getId(),
-                            new CreateDocumentUpdateRequest("Tên đồng thời", "Mô tả", true)
-                    );
+                    UUID id = requestService.createDeleteRequest(advisor.getId(), doc.getId());
                     synchronized (created) {
                         created.add(id);
                     }
@@ -307,11 +284,7 @@ class DocumentRagRequestPostgresIntegrationTest {
                 false
         ));
         Document doc = createActiveDocument("Quy chế cạnh tranh", "Mô tả", true);
-        UUID reqId = requestService.createUpdateRequest(
-                advisor.getId(),
-                doc.getId(),
-                new CreateDocumentUpdateRequest("Tên mới", "Mô tả", true)
-        );
+        UUID reqId = requestService.createDeleteRequest(advisor.getId(), doc.getId());
 
         CountDownLatch ready = new CountDownLatch(2);
         CountDownLatch start = new CountDownLatch(1);
@@ -375,7 +348,7 @@ class DocumentRagRequestPostgresIntegrationTest {
             assertThat(reviewed.status()).isEqualTo(DocumentRequestStatus.APPROVED);
             assertThat(reviewed.reviewedByName()).isEqualTo("Admin Reviewer");
             assertThat(reviewed.rejectionReason()).isNull();
-            assertThat(persistedDoc.getTitle()).isEqualTo("Tên mới");
+            assertThat(persistedDoc.getLifecycleStatus()).isEqualTo(DocumentLifecycleStatus.ARCHIVED);
         } else {
             assertThat(winners.getFirst()).isEqualTo("REJECTED");
             assertThat(reviewed.status()).isEqualTo(DocumentRequestStatus.REJECTED);
@@ -462,6 +435,92 @@ class DocumentRagRequestPostgresIntegrationTest {
         assertThat(readyDoc.getLifecycleStatus()).isEqualTo(DocumentLifecycleStatus.ACTIVE);
         assertThat(readyDoc.getRagStatus()).isEqualTo(RagStatus.READY);
         assertThat(documentService.getDocuments(otherAdvisor.getId())).hasSize(1);
+    }
+
+    @Test
+    void ownerAdvisorCannotReadOrDownloadProcessingOrFailedDraftsAndAdminReviewFileRespectsState() throws Exception {
+        Document processingDoc = documentRepository.save(new Document(
+                advisor,
+                "Đang xử lý",
+                "Mô tả",
+                true,
+                "processing.pdf",
+                "documents/" + UUID.randomUUID() + ".pdf",
+                "application/pdf",
+                2048L,
+                "c".repeat(64)
+        ));
+        processingDoc.startRagProcessing();
+        processingDoc = documentRepository.saveAndFlush(processingDoc);
+
+        Document failedDoc = documentRepository.save(new Document(
+                advisor,
+                "Xử lý thất bại",
+                "Mô tả",
+                true,
+                "failed.pdf",
+                "documents/" + UUID.randomUUID() + ".pdf",
+                "application/pdf",
+                2048L,
+                "d".repeat(64)
+        ));
+        failedDoc.startRagProcessing();
+        failedDoc.failRagIndexing();
+        failedDoc = documentRepository.saveAndFlush(failedDoc);
+
+        var advisorVisibleDocs = documentService.getDocuments(advisor.getId());
+        assertThat(advisorVisibleDocs)
+                .extracting(doc -> doc.documentId())
+                .contains(processingDoc.getId(), failedDoc.getId());
+
+        for (UUID blockedId : List.of(processingDoc.getId(), failedDoc.getId())) {
+            assertThatThrownBy(() -> documentService.getDocumentContent(advisor.getId(), blockedId))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+            assertThatThrownBy(() -> documentService.previewDocument(advisor.getId(), blockedId))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+            assertThatThrownBy(() -> documentService.downloadDocument(advisor.getId(), blockedId))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+        }
+
+        Account secondAdmin = accountRepository.save(new Account(
+                "Second Admin",
+                "admin2-review@hcmute.edu.vn",
+                "hash",
+                AccountRole.ADMIN,
+                AccountAccessStatus.ACTIVE,
+                false
+        ));
+        Document reviewPdfDoc = documentRepository.save(new Document(
+                advisor,
+                "PDF không cho SV tải",
+                "Mô tả",
+                false,
+                "restricted-review.pdf",
+                "documents/" + UUID.randomUUID() + ".pdf",
+                "application/pdf",
+                2048L,
+                "e".repeat(64)
+        ));
+        UUID reviewReqId = requestService.createAddRequest(advisor.getId(), reviewPdfDoc.getId());
+        when(documentStorageService.loadBytes(reviewPdfDoc.getStoragePath()))
+                .thenReturn("%PDF-1.4 review".getBytes(StandardCharsets.UTF_8));
+
+        var reviewFile = requestService.getReviewFile(admin.getId(), reviewReqId);
+        assertThat(reviewFile.originalFilename()).isEqualTo("restricted-review.pdf");
+        assertThat(reviewFile.mimeType()).isEqualTo("application/pdf");
+        assertThat(reviewFile.allowDownload()).isFalse();
+        assertThat(reviewFile.content()).isEqualTo("%PDF-1.4 review".getBytes(StandardCharsets.UTF_8));
+
+        when(aiServiceClient.ingestFromStorage(any(AiServiceIngestRequest.class)))
+                .thenReturn(new AiServiceIngestResponse("processing", reviewPdfDoc.getId().toString(), "Accepted"));
+        requestService.approveRequest(admin.getId(), reviewReqId);
+
+        assertThatThrownBy(() -> requestService.getReviewFile(secondAdmin.getId(), reviewReqId))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.CONFLICT));
     }
 
     private void assertIsolatedTestSchema() {

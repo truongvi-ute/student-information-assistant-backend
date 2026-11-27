@@ -136,6 +136,7 @@ CREATE TABLE documents (
 	size_bytes BIGINT NOT NULL,
 	checksum_sha256 VARCHAR(64) NOT NULL,
 	rag_status VARCHAR(20) NOT NULL DEFAULT 'NOT_INDEXED',
+	rag_attempt_id UUID,
 	lifecycle_status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
 	archived_at TIMESTAMPTZ,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -169,7 +170,9 @@ CREATE TABLE documents (
 
 CREATE TABLE document_rag_requests (
 	document_rag_request_id UUID,
-	document_id UUID NOT NULL,
+	document_id UUID,
+	deleted_document_id UUID,
+	deleted_document_title VARCHAR(255),
 	requested_by_advisor_id UUID NOT NULL,
 	reviewed_by_admin_id UUID,
 	request_type VARCHAR(20) NOT NULL,
@@ -182,6 +185,11 @@ CREATE TABLE document_rag_requests (
 	reviewed_at TIMESTAMPTZ,
 
 	CONSTRAINT pk_document_rag_requests PRIMARY KEY (document_rag_request_id),
+	CONSTRAINT chk_document_rag_request_reference CHECK (
+		(document_id IS NOT NULL AND deleted_document_id IS NULL AND deleted_document_title IS NULL)
+		OR (document_id IS NULL AND deleted_document_id IS NOT NULL
+			AND deleted_document_title IS NOT NULL AND status = 'REJECTED')
+	),
 
 	CONSTRAINT fk_document_rag_requests_document_id
 		FOREIGN KEY (document_id)
@@ -208,6 +216,11 @@ CREATE TABLE document_rag_requests (
 CREATE UNIQUE INDEX uq_document_rag_requests_one_pending
 	ON document_rag_requests (document_id)
 	WHERE status = 'PENDING';
+
+CREATE TABLE document_storage_cleanup (
+	storage_path TEXT PRIMARY KEY,
+	retry_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
 
 CREATE TABLE notifications (

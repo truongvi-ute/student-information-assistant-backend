@@ -5,6 +5,7 @@ import java.util.UUID;
 import java.util.List;
 import vn.hcmute.edu.sia.dto.request.CreateDocumentUpdateRequest;
 import vn.hcmute.edu.sia.dto.response.DocumentRagRequestResponse;
+import vn.hcmute.edu.sia.entity.Document;
 
 public interface DocumentRagRequestService {
     UUID createAddRequest(UUID advisorId, UUID documentId);
@@ -15,4 +16,6 @@ public interface DocumentRagRequestService {
     DownloadedDocumentFile getReviewFile(UUID adminId, UUID requestId);
     void approveRequest(UUID adminId, UUID requestId);
     void rejectRequest(UUID adminId, UUID requestId, String reason);
+    void retryRag(UUID adminId, UUID documentId);
+    void scheduleIngestion(Document document);
 }

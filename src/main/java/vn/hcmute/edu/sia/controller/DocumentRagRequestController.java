@@ -63,6 +63,16 @@ public class DocumentRagRequestController {
         return ResponseEntity.status(HttpStatus.CREATED).body(requestId);
     }
 
+    @PostMapping("/documents/{documentId}/retry-rag")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Void> retryRag(
+            @AuthenticationPrincipal AccountPrincipal principal,
+            @PathVariable UUID documentId
+    ) {
+        requestService.retryRag(principal.getAccountId(), documentId);
+        return ResponseEntity.accepted().build();
+    }
+
     @GetMapping("/mine")
     @PreAuthorize("hasRole('ADVISOR')")
     public ResponseEntity<List<DocumentRagRequestResponse>> getMyRequests(

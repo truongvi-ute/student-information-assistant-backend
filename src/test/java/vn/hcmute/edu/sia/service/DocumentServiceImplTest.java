@@ -4,6 +4,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -54,6 +56,9 @@ class DocumentServiceImplTest {
     @Mock
     private DocumentUploadValidator documentUploadValidator;
 
+    @Mock
+    private DocumentRagRequestService ragRequestService;
+
     @InjectMocks
     private DocumentServiceImpl documentService;
 
@@ -91,15 +96,32 @@ class DocumentServiceImplTest {
     }
 
     @Test
-    @DisplayName("Upload thất bại khi uploader là Admin")
-    void uploadDocument_Admin_ThrowsForbidden() {
-        Account admin = new Account("Admin", "admin@test.edu.vn", "hash", AccountRole.ADMIN, AccountAccessStatus.ACTIVE, false);
+    void adminUploadEntersProcessingAndSchedulesIngestion() throws IOException {
+        var admin = new Account("Admin", "admin@test.edu.vn", "hash",
+                AccountRole.ADMIN, AccountAccessStatus.ACTIVE, false);
         UUID adminId = UUID.randomUUID();
         when(accountRepository.findById(adminId)).thenReturn(Optional.of(admin));
+        when(documentUploadValidator.validateAndGetMimeType(file)).thenReturn("application/pdf");
+        when(documentStorageService.store(file, "application/pdf")).thenReturn(storedFile);
+        when(documentRepository.saveAndFlush(any(Document.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = documentService.uploadDocument(adminId, new UploadDocumentRequest(file, "Quy chế", null, true));
+
+        assertThat(response.lifecycleStatus()).isEqualTo(DocumentLifecycleStatus.DRAFT);
+        assertThat(response.ragStatus()).isEqualTo(RagStatus.PROCESSING);
+        verify(ragRequestService).scheduleIngestion(any(Document.class));
+    }
+
+    @Test
+    @DisplayName("Upload thất bại khi uploader là Student")
+    void uploadDocument_Student_ThrowsForbidden() {
+        Account student = new Account("Student", "student@test.edu.vn", "hash", AccountRole.STUDENT, AccountAccessStatus.ACTIVE, false);
+        UUID studentId = UUID.randomUUID();
+        when(accountRepository.findById(studentId)).thenReturn(Optional.of(student));
 
         UploadDocumentRequest request = new UploadDocumentRequest(file, "Quy chế", null, true);
 
-        assertThatThrownBy(() -> documentService.uploadDocument(adminId, request))
+        assertThatThrownBy(() -> documentService.uploadDocument(studentId, request))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
     }
@@ -324,6 +346,79 @@ class DocumentServiceImplTest {
                     .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
         }
         verifyNoInteractions(documentStorageService);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = RagStatus.class, names = {"PROCESSING", "FAILED"})
+    @DisplayName("Advisor chủ sở hữu dù allowDownload=true vẫn bị chặn 403 trên content, preview và download khi DRAFT PROCESSING/FAILED")
+    void ownerAdvisor_BlocksContentPreviewAndDownloadWhenDraftProcessingOrFailed(RagStatus ragStatus) throws Exception {
+        setAccountId(advisor, advisorId);
+        UUID docId = UUID.randomUUID();
+        Document doc = new Document(advisor, "Tài liệu xử lý", null, true, "proc.pdf", "documents/proc.pdf", "application/pdf", 100L, "d".repeat(64));
+        setId(doc, docId);
+        doc.startRagProcessing();
+        if (ragStatus == RagStatus.FAILED) {
+            doc.failRagIndexing();
+        }
+
+        when(accountRepository.findById(advisorId)).thenReturn(Optional.of(advisor));
+        when(documentRepository.findById(docId)).thenReturn(Optional.of(doc));
+
+        assertThatThrownBy(() -> documentService.getDocumentContent(advisorId, docId))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+        assertThatThrownBy(() -> documentService.previewDocument(advisorId, docId))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+        assertThatThrownBy(() -> documentService.downloadDocument(advisorId, docId))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+        verifyNoInteractions(documentStorageService);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = RagStatus.class, names = {"PROCESSING", "FAILED"})
+    @DisplayName("Admin vẫn preview được tài liệu DRAFT PROCESSING hoặc FAILED")
+    void adminCanStillPreviewProcessingOrFailedDraft(RagStatus ragStatus) throws Exception {
+        UUID adminId = UUID.randomUUID();
+        Account admin = new Account("Admin", "admin@test.edu.vn", "hash", AccountRole.ADMIN, AccountAccessStatus.ACTIVE, false);
+        setAccountId(admin, adminId);
+        UUID docId = UUID.randomUUID();
+        Document doc = new Document(advisor, "Tài liệu Admin kiểm tra", null, false, "proc.pdf", "documents/proc.pdf", "application/pdf", 100L, "d".repeat(64));
+        setId(doc, docId);
+        doc.startRagProcessing();
+        if (ragStatus == RagStatus.FAILED) {
+            doc.failRagIndexing();
+        }
+
+        when(accountRepository.findById(adminId)).thenReturn(Optional.of(admin));
+        when(documentRepository.findById(docId)).thenReturn(Optional.of(doc));
+        when(documentStorageService.loadBytes("documents/proc.pdf")).thenReturn("admin-preview".getBytes());
+
+        DownloadedDocumentFile previewed = documentService.previewDocument(adminId, docId);
+
+        assertThat(previewed.content()).isEqualTo("admin-preview".getBytes());
+    }
+
+    @Test
+    @DisplayName("Advisor vẫn xem được ACTIVE/READY và chỉ tải được khi allowDownload=true")
+    void advisorCanReadActiveReadyAndDownloadOnlyWhenAllowed() throws Exception {
+        setAccountId(advisor, advisorId);
+        UUID docId = UUID.randomUUID();
+        Document restrictedActiveDoc = new Document(advisor, "Active không cho tải", null, false, "active.pdf", "documents/active.pdf", "application/pdf", 100L, "e".repeat(64));
+        setId(restrictedActiveDoc, docId);
+        restrictedActiveDoc.completeRagIndexing();
+
+        when(accountRepository.findById(advisorId)).thenReturn(Optional.of(advisor));
+        when(documentRepository.findById(docId)).thenReturn(Optional.of(restrictedActiveDoc));
+        when(documentStorageService.loadBytes("documents/active.pdf")).thenReturn("active-pdf".getBytes());
+        when(documentStorageService.loadUtf8Text("extracted/" + docId + ".md")).thenReturn("# Active");
+
+        assertThat(documentService.getDocumentContent(advisorId, docId).markdownContent()).isEqualTo("# Active");
+        assertThat(documentService.previewDocument(advisorId, docId).content()).isEqualTo("active-pdf".getBytes());
+        assertThatThrownBy(() -> documentService.downloadDocument(advisorId, docId))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
     }
 
     private static void setAccountId(Account account, UUID id) throws Exception {

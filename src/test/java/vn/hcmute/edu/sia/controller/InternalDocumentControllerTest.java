@@ -43,7 +43,7 @@ class InternalDocumentControllerTest {
     void updateRagStatus_InvalidApiKey_ThrowsUnauthorized() {
         var req = new DocumentRagStatusCallbackRequest("READY", 5, null);
 
-        assertThatThrownBy(() -> controller.updateRagStatus(documentId, "wrong-key", req))
+        assertThatThrownBy(() -> controller.updateRagStatus(documentId, null, "wrong-key", req))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED));
 
@@ -55,7 +55,7 @@ class InternalDocumentControllerTest {
     void updateRagStatus_Ready_MarksReady() {
         var req = new DocumentRagStatusCallbackRequest("READY", 5, null);
 
-        ResponseEntity<Void> response = controller.updateRagStatus(documentId, "secret-key", req);
+        ResponseEntity<Void> response = controller.updateRagStatus(documentId, null, "secret-key", req);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         verify(documentRagStatusService).markReady(documentId);
@@ -66,7 +66,7 @@ class InternalDocumentControllerTest {
     void updateRagStatus_Failed_MarksFailed() {
         var req = new DocumentRagStatusCallbackRequest("FAILED", 0, "RustFS error");
 
-        ResponseEntity<Void> response = controller.updateRagStatus(documentId, "secret-key", req);
+        ResponseEntity<Void> response = controller.updateRagStatus(documentId, null, "secret-key", req);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         verify(documentRagStatusService).markFailed(documentId);
@@ -77,7 +77,7 @@ class InternalDocumentControllerTest {
     void updateRagStatus_UnsupportedStatus_ThrowsBadRequest() {
         var req = new DocumentRagStatusCallbackRequest("UNKNOWN", 0, null);
 
-        assertThatThrownBy(() -> controller.updateRagStatus(documentId, "secret-key", req))
+        assertThatThrownBy(() -> controller.updateRagStatus(documentId, null, "secret-key", req))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
     }

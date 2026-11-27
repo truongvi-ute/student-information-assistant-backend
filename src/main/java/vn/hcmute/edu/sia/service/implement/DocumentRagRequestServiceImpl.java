@@ -37,7 +37,6 @@ import vn.hcmute.edu.sia.service.AiServiceClient;
 import vn.hcmute.edu.sia.service.DocumentRagRequestService;
 import vn.hcmute.edu.sia.service.DocumentRagStatusService;
 import java.util.Locale;
-import java.util.Objects;
 import org.springframework.dao.DataIntegrityViolationException;
 import vn.hcmute.edu.sia.dto.request.CreateDocumentUpdateRequest;
 
@@ -102,34 +101,7 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
             UUID documentId,
             CreateDocumentUpdateRequest updateRequest
     ) {
-        Account advisor = requireActiveAdvisor(advisorId);
-        validateUpdateRequestPayload(updateRequest);
-
-        Document document = requireOwnedLockedDocument(advisorId, documentId);
-        requireActiveDocument(document, "Only active documents are eligible for UPDATE");
-
-        String normalizedTitle = updateRequest.getTitle().trim();
-        String normalizedDescription = normalizeOptionalText(updateRequest.getDescription());
-        Boolean proposedAllowDownload = updateRequest.getAllowDownload();
-
-        boolean unchanged = Objects.equals(normalizedTitle, document.getTitle())
-                && Objects.equals(normalizedDescription, normalizeOptionalText(document.getDescription()))
-                && Objects.equals(proposedAllowDownload, document.isAllowDownload());
-        if (unchanged) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Update request must change at least one field");
-        }
-
-        if (requestRepository.existsByDocumentAndStatus(document, DocumentRequestStatus.PENDING)) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "This document already has a pending request");
-        }
-
-        return savePendingRequest(DocumentRagRequest.createUpdate(
-                document,
-                advisor,
-                normalizedTitle,
-                normalizedDescription,
-                proposedAllowDownload
-        ));
+        throw new ResponseStatusException(HttpStatus.GONE, "Edit document metadata before submitting it for approval");
     }
 
     @Override
@@ -196,23 +168,11 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
                 requireAddEligibleDocument(lockedDocument);
                 request.approve(admin);
                 lockedDocument.startRagProcessing();
-                scheduleStorageIngestion(
-                        lockedDocument.getId(),
-                        lockedDocument.getStoragePath(),
-                        lockedDocument.getOriginalFilename(),
-                        lockedDocument.getTitle(),
-                        lockedDocument.getDescription()
-                );
+                scheduleIngestion(lockedDocument);
             }
-            case UPDATE -> {
-                requireActiveDocument(lockedDocument, "Only active documents are eligible for UPDATE");
-                request.approve(admin);
-                lockedDocument.applyApprovedUpdate(
-                        request.getProposedTitle(),
-                        request.getProposedDescription(),
-                        request.getProposedAllowDownload()
-                );
-            }
+            case UPDATE -> throw new ResponseStatusException(
+                    HttpStatus.CONFLICT, "Legacy UPDATE requests can only be rejected"
+            );
             case DELETE -> {
                 requireActiveDocument(lockedDocument, "Only active documents are eligible for DELETE");
                 request.approve(admin);
@@ -282,14 +242,15 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
     }
 
     private void requireAddEligibleDocument(Document document) {
-        if (document.getLifecycleStatus() != DocumentLifecycleStatus.DRAFT
+        if (document == null
+                || document.getLifecycleStatus() != DocumentLifecycleStatus.DRAFT
                 || document.getRagStatus() != RagStatus.NOT_INDEXED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Only unprocessed draft documents are eligible for ADD");
         }
     }
 
     private void requireActiveDocument(Document document, String errorMessage) {
-        if (document.getLifecycleStatus() != DocumentLifecycleStatus.ACTIVE) {
+        if (!document.isEligibleForRag()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, errorMessage);
         }
     }
@@ -345,29 +306,24 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
         return false;
     }
 
-    private void validateUpdateRequestPayload(CreateDocumentUpdateRequest request) {
-        if (request == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Update request body is required");
+    @Override
+    @Transactional
+    public void retryRag(UUID adminId, UUID documentId) {
+        Account admin = accountRepository.findById(adminId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account was not found"));
+        if (admin.getRole() != AccountRole.ADMIN || admin.getAccessStatus() != AccountAccessStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "An active admin account is required");
         }
-        if (request.getTitle() == null || request.getTitle().isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Title must not be blank");
-        }
-        if (request.getTitle().trim().length() > 255) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Title must not exceed 255 characters");
-        }
-        if (!request.isDescriptionPresent()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Description field must be provided");
-        }
-        if (request.getAllowDownload() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "allowDownload must not be null");
-        }
+        Document document = documentRepository.findByIdForUpdate(documentId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document was not found"));
+        document.retryRagProcessing();
+        scheduleIngestion(document);
     }
 
-    private String normalizeOptionalText(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        return value.trim();
+    @Override
+    public void scheduleIngestion(Document document) {
+        scheduleStorageIngestion(document.getId(), document.getStoragePath(), document.getOriginalFilename(),
+                document.getTitle(), document.getDescription(), document.getRagAttemptId());
     }
 
     private void scheduleStorageIngestion(
@@ -375,18 +331,19 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
             String storagePath,
             String originalFilename,
             String title,
-            String description
+            String description,
+            UUID attemptId
     ) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    triggerStorageIngestion(documentId, storagePath, originalFilename, title, description);
+                    triggerStorageIngestion(documentId, storagePath, originalFilename, title, description, attemptId);
                 }
             });
             return;
         }
-        triggerStorageIngestion(documentId, storagePath, originalFilename, title, description);
+        triggerStorageIngestion(documentId, storagePath, originalFilename, title, description, attemptId);
     }
 
     private void triggerStorageIngestion(
@@ -394,7 +351,8 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
             String storagePath,
             String originalFilename,
             String title,
-            String description
+            String description,
+            UUID attemptId
     ) {
         if (aiServiceClient == null || documentId == null) {
             return;
@@ -404,6 +362,9 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
                 ? callbackBaseUrl.replaceAll("/+$", "")
                 : "http://localhost:8080";
         String callbackUrl = normalizedBaseUrl + "/api/internal/documents/" + documentId + "/rag-status";
+        if (attemptId != null) {
+            callbackUrl += "?attemptId=" + attemptId;
+        }
         Map<String, Object> metadata = new LinkedHashMap<>();
         if (title != null && !title.isBlank()) {
             metadata.put("title", title.strip());
@@ -423,7 +384,11 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
         } catch (RuntimeException exception) {
             LOGGER.error("Failed to trigger AI ingestion for document {}", documentId, exception);
             if (documentRagStatusService != null) {
-                documentRagStatusService.markFailed(documentId);
+                if (attemptId == null) {
+                    documentRagStatusService.markFailed(documentId);
+                } else {
+                    documentRagStatusService.markFailed(documentId, attemptId);
+                }
             }
         }
     }

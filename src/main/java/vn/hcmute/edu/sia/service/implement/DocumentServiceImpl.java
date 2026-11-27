@@ -6,12 +6,14 @@ import java.util.UUID;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import vn.hcmute.edu.sia.dto.internal.DownloadedDocumentFile;
 import vn.hcmute.edu.sia.dto.internal.StoredDocumentFile;
 import vn.hcmute.edu.sia.dto.request.UploadDocumentRequest;
+import vn.hcmute.edu.sia.dto.request.CreateDocumentUpdateRequest;
 import vn.hcmute.edu.sia.dto.response.DocumentContentResponse;
 import vn.hcmute.edu.sia.dto.response.DocumentResponse;
 import vn.hcmute.edu.sia.dto.response.DocumentUploadResponse;
@@ -20,10 +22,14 @@ import vn.hcmute.edu.sia.entity.Document;
 import vn.hcmute.edu.sia.enums.AccountAccessStatus;
 import vn.hcmute.edu.sia.enums.AccountRole;
 import vn.hcmute.edu.sia.enums.DocumentLifecycleStatus;
+import vn.hcmute.edu.sia.enums.DocumentRequestStatus;
+import vn.hcmute.edu.sia.enums.RagStatus;
 import vn.hcmute.edu.sia.exception.DocumentStorageException;
 import vn.hcmute.edu.sia.repository.AccountRepository;
 import vn.hcmute.edu.sia.repository.DocumentRepository;
+import vn.hcmute.edu.sia.repository.DocumentRagRequestRepository;
 import vn.hcmute.edu.sia.service.DocumentService;
+import vn.hcmute.edu.sia.service.DocumentRagRequestService;
 import vn.hcmute.edu.sia.service.DocumentStorageService;
 import vn.hcmute.edu.sia.validation.DocumentUploadValidator;
 
@@ -35,6 +41,9 @@ public class DocumentServiceImpl implements DocumentService {
     private final DocumentRepository documentRepository;
     private final DocumentStorageService documentStorageService;
     private final DocumentUploadValidator documentUploadValidator;
+    private final DocumentRagRequestRepository requestRepository;
+    private final JdbcTemplate jdbcTemplate;
+    private final DocumentRagRequestService ragRequestService;
 
     @Override
     @Transactional
@@ -44,10 +53,10 @@ public class DocumentServiceImpl implements DocumentService {
     ) {
         Account uploader = requireActiveAccount(uploaderId);
 
-        if (uploader.getRole() != AccountRole.ADVISOR) {
+        if (uploader.getRole() != AccountRole.ADVISOR && uploader.getRole() != AccountRole.ADMIN) {
             throw new ResponseStatusException(
                     HttpStatus.FORBIDDEN,
-                    "An active advisor account is required to upload documents"
+                    "An active advisor or admin account is required to upload documents"
             );
         }
 
@@ -80,12 +89,54 @@ public class DocumentServiceImpl implements DocumentService {
                     storedFile.checksumSha256()
             );
 
+            boolean directIngestion = uploader.getRole() == AccountRole.ADMIN;
+            if (directIngestion) {
+                document.startRagProcessing();
+            }
             Document savedDocument = documentRepository.saveAndFlush(document);
+            if (directIngestion) {
+                ragRequestService.scheduleIngestion(savedDocument);
+            }
             return DocumentUploadResponse.from(savedDocument);
         } catch (RuntimeException exception) {
             deleteStoredFileAfterFailure(storedFile, exception);
             throw exception;
         }
+    }
+
+    @Override
+    @Transactional
+    public void updateDraft(UUID requesterId, UUID documentId, CreateDocumentUpdateRequest request) {
+        Document document = requireEditableDraft(requesterId, documentId, true);
+        document.updateDraftMetadata(request.getTitle(), request.getDescription(), request.getAllowDownload());
+    }
+
+    @Override
+    @Transactional
+    public void deleteDraft(UUID advisorId, UUID documentId) {
+        Document document = requireEditableDraft(advisorId, documentId, false);
+        requestRepository.keepDeletedDocumentHistory(
+                document, DocumentRequestStatus.REJECTED, documentId, document.getTitle()
+        );
+        jdbcTemplate.update("INSERT INTO document_storage_cleanup (storage_path) VALUES (?)", document.getStoragePath());
+        documentRepository.delete(document);
+    }
+
+    private Document requireEditableDraft(UUID requesterId, UUID documentId, boolean allowAdmin) {
+        Account requester = requireActiveAccount(requesterId);
+        Document document = documentRepository.findByIdForUpdate(documentId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document was not found"));
+        boolean ownsDraft = requester.getRole() == AccountRole.ADVISOR
+                && document.getUploadedBy().getId().equals(requesterId);
+        if (!ownsDraft && !(allowAdmin && requester.getRole() == AccountRole.ADMIN)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot modify this draft");
+        }
+        if (document.getLifecycleStatus() != DocumentLifecycleStatus.DRAFT
+                || document.getRagStatus() != RagStatus.NOT_INDEXED
+                || requestRepository.existsByDocumentAndStatus(document, DocumentRequestStatus.PENDING)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This document can no longer be edited as a draft");
+        }
+        return document;
     }
 
     @Override
@@ -196,13 +247,23 @@ public class DocumentServiceImpl implements DocumentService {
             );
         }
 
-        if (requester.getRole() == AccountRole.ADVISOR
-                && document.getLifecycleStatus() != DocumentLifecycleStatus.ACTIVE
-                && (document.getUploadedBy() == null || !requesterId.equals(document.getUploadedBy().getId()))) {
-            throw new ResponseStatusException(
-                    HttpStatus.FORBIDDEN,
-                    "You do not have permission to access this document"
-            );
+        if (requester.getRole() == AccountRole.ADVISOR) {
+            if (document.getLifecycleStatus() == DocumentLifecycleStatus.DRAFT
+                    && (document.getRagStatus() == RagStatus.PROCESSING
+                    || document.getRagStatus() == RagStatus.FAILED)) {
+                throw new ResponseStatusException(
+                        HttpStatus.FORBIDDEN,
+                        "Documents in processing or failed state are status-only for advisors"
+                );
+            }
+
+            if (document.getLifecycleStatus() != DocumentLifecycleStatus.ACTIVE
+                    && (document.getUploadedBy() == null || !requesterId.equals(document.getUploadedBy().getId()))) {
+                throw new ResponseStatusException(
+                        HttpStatus.FORBIDDEN,
+                        "You do not have permission to access this document"
+                );
+            }
         }
     }
 
