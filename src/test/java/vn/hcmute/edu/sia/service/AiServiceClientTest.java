@@ -189,4 +189,61 @@ class AiServiceClientTest {
                 new AiServiceIngestRequest(" ", "documents/a.pdf", "a.pdf", null, Map.of())
         )).isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    @DisplayName("Gửi kèm allowed_document_ids (kể cả rỗng) trong POST /v1/chat")
+    void chat_WithAllowedDocumentIds_SerializesWhitelist() {
+        String responseJson = """
+                {
+                  "question": "Quy chế?",
+                  "answer": "Không tìm thấy thông tin.",
+                  "sources": []
+                }
+                """;
+
+        mockServer.expect(requestTo("http://localhost:8000/v1/chat"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.allowed_document_ids").isArray())
+                .andExpect(jsonPath("$.allowed_document_ids.length()").value(1))
+                .andExpect(jsonPath("$.allowed_document_ids[0]").value("doc-active-1"))
+                .andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON));
+
+        aiServiceClient.chat(new AiServiceChatRequest(
+                "Quy chế?",
+                5,
+                null,
+                List.of(),
+                List.of("doc-active-1")
+        ));
+
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("Gọi DELETE /v1/documents/{documentId} để xóa vector trên Qdrant")
+    void deleteDocumentVectors_Success_CallsDeleteEndpoint() {
+        mockServer.expect(requestTo("http://localhost:8000/v1/documents/doc-archive-1"))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withSuccess("{\"status\":\"deleted\",\"document_id\":\"doc-archive-1\",\"message\":\"ok\"}", MediaType.APPLICATION_JSON));
+
+        aiServiceClient.deleteDocumentVectors("doc-archive-1");
+
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("Từ chối deleteDocumentVectors khi documentId rỗng và ánh xạ lỗi 502")
+    void deleteDocumentVectors_BlankAndUpstreamError() {
+        assertThatThrownBy(() -> aiServiceClient.deleteDocumentVectors("   "))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        mockServer.expect(requestTo("http://localhost:8000/v1/documents/doc-err"))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withStatus(HttpStatus.BAD_GATEWAY));
+
+        assertThatThrownBy(() -> aiServiceClient.deleteDocumentVectors("doc-err"))
+                .isInstanceOf(AiServiceException.class)
+                .extracting(ex -> ((AiServiceException) ex).getStatus())
+                .isEqualTo(HttpStatus.BAD_GATEWAY);
+    }
 }

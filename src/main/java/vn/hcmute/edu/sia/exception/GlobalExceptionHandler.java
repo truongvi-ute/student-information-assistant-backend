@@ -4,6 +4,7 @@ import java.time.OffsetDateTime;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -87,6 +88,14 @@ public class GlobalExceptionHandler {
                 return buildErrorResponse(
                         HttpStatus.BAD_REQUEST,
                         message
+                );
+        }
+
+        @ExceptionHandler(HttpMessageNotReadableException.class)
+        public ResponseEntity<ApiErrorResponse> handleMessageNotReadable(HttpMessageNotReadableException exception) {
+                return buildErrorResponse(
+                        HttpStatus.BAD_REQUEST,
+                        "Malformed request body."
                 );
         }
         @ExceptionHandler(OtpVerificationLockedException.class)

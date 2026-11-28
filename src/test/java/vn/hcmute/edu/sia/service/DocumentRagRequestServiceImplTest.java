@@ -3,6 +3,8 @@ package vn.hcmute.edu.sia.service;
 import java.io.IOException;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.springframework.dao.DataIntegrityViolationException;
+import vn.hcmute.edu.sia.dto.request.CreateDocumentUpdateRequest;
 import vn.hcmute.edu.sia.enums.DocumentLifecycleStatus;
 import vn.hcmute.edu.sia.enums.RagStatus;
 import vn.hcmute.edu.sia.exception.DocumentStorageException;
@@ -272,9 +274,12 @@ class DocumentRagRequestServiceImplTest {
         prepareAdmin();
         DocumentRagRequest request = new DocumentRagRequest(document, advisor);
         when(requestRepository.findByIdForUpdate(requestId)).thenReturn(Optional.of(request));
+        when(document.getId()).thenReturn(documentId);
+        when(documentRepository.findByIdForUpdate(documentId)).thenReturn(Optional.of(document));
         service.rejectRequest(adminId, requestId, "Incomplete");
         assertThat(request.getStatus()).isEqualTo(DocumentRequestStatus.REJECTED);
         assertThat(request.getRejectionReason()).isEqualTo("Incomplete");
+        verify(documentRepository).findByIdForUpdate(documentId);
     }
 
     @Test
@@ -402,6 +407,55 @@ class DocumentRagRequestServiceImplTest {
         verifyNoInteractions(aiServiceClient);
     }
 
+    @Test
+    void adminCanInspectPdfReviewFileWithoutStudentDownloadPermission() throws IOException {
+        DocumentRagRequest request = prepareReviewFile();
+        prepareEligibleDocument();
+        when(document.getStoragePath()).thenReturn("documents/review.pdf");
+        when(document.getOriginalFilename()).thenReturn("review.pdf");
+        when(document.getMimeType()).thenReturn("application/pdf");
+        when(document.isAllowDownload()).thenReturn(false);
+        when(documentStorageService.loadBytes("documents/review.pdf")).thenReturn(new byte[]{37, 80, 68, 70});
+
+        var result = service.getReviewFile(adminId, requestId);
+
+        assertThat(result.content()).containsExactly((byte) 37, (byte) 80, (byte) 68, (byte) 70);
+        assertThat(result.originalFilename()).isEqualTo("review.pdf");
+        assertThat(result.mimeType()).isEqualTo("application/pdf");
+        assertThat(result.allowDownload()).isFalse();
+        assertThat(request.getStatus()).isEqualTo(DocumentRequestStatus.PENDING);
+        verify(document, never()).startRagProcessing();
+        verifyNoInteractions(aiServiceClient);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = DocumentRequestType.class, names = {"UPDATE", "DELETE"})
+    void reviewFileRejectsNonAddRequestTypes(DocumentRequestType requestType) {
+        prepareAdmin();
+        DocumentRagRequest request = requestType == DocumentRequestType.UPDATE
+                ? DocumentRagRequest.createUpdate(document, advisor, "Tên mới", null, false)
+                : DocumentRagRequest.createDelete(document, advisor);
+        when(requestRepository.findById(requestId)).thenReturn(Optional.of(request));
+
+        assertThatThrownBy(() -> service.getReviewFile(adminId, requestId))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(e -> ((ResponseStatusException) e).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        verifyNoInteractions(documentStorageService);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = RagStatus.class, names = {"PROCESSING", "FAILED"})
+    void reviewFileRejectsDraftDocumentsWithIneligibleRagStatus(RagStatus ragStatus) {
+        prepareReviewFile();
+        when(document.getLifecycleStatus()).thenReturn(DocumentLifecycleStatus.DRAFT);
+        when(document.getRagStatus()).thenReturn(ragStatus);
+
+        assertThatThrownBy(() -> service.getReviewFile(adminId, requestId))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(e -> ((ResponseStatusException) e).getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        verifyNoInteractions(documentStorageService);
+    }
+
     @ParameterizedTest
     @EnumSource(value = AccountRole.class, names = {"STUDENT", "ADVISOR"})
     void reviewFileRejectsNonAdmin(AccountRole role) {
@@ -472,5 +526,107 @@ class DocumentRagRequestServiceImplTest {
         assertThatThrownBy(() -> service.approveRequest(adminId, requestId))
                 .isInstanceOf(ResponseStatusException.class);
         verifyNoInteractions(aiServiceClient, documentRepository);
+    }
+
+    @Test
+    void retiredUpdateEndpointDoesNotCreateRequests() {
+        var payload = new CreateDocumentUpdateRequest("Tên mới", null, false);
+        assertThatThrownBy(() -> service.createUpdateRequest(advisorId, documentId, payload))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                .isEqualTo(HttpStatus.GONE);
+        verify(requestRepository, never()).save(any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = DocumentLifecycleStatus.class, names = {"DRAFT", "ARCHIVED"})
+    void createDeleteRejectsNonActiveDocument(DocumentLifecycleStatus status) {
+        prepareAdvisorDocument();
+        assertThatThrownBy(() -> service.createDeleteRequest(advisorId, documentId))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+        verify(requestRepository, never()).save(any());
+    }
+
+    @Test
+    void createDeleteRequestMapsOnePendingUniqueConstraintToConflict() {
+        prepareAdvisorDocument();
+        when(document.isEligibleForRag()).thenReturn(true);
+        when(requestRepository.save(any(DocumentRagRequest.class)))
+                .thenThrow(new DataIntegrityViolationException(
+                        "duplicate key value violates unique constraint \"uq_document_rag_requests_one_pending\""
+                ));
+
+        assertThatThrownBy(() -> service.createDeleteRequest(advisorId, documentId))
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting(e -> ((ResponseStatusException) e).getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void createDeleteRequestRethrowsUnrelatedDataIntegrityViolation() {
+        prepareAdvisorDocument();
+        when(document.isEligibleForRag()).thenReturn(true);
+        when(requestRepository.save(any(DocumentRagRequest.class)))
+                .thenThrow(new DataIntegrityViolationException("fk_document_rag_requests_document_id violation"));
+
+        assertThatThrownBy(() -> service.createDeleteRequest(advisorId, documentId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void adminCannotApproveLegacyUpdateRequest() {
+        prepareAdmin();
+        when(document.getId()).thenReturn(documentId);
+        when(documentRepository.findByIdForUpdate(documentId)).thenReturn(Optional.of(document));
+
+        DocumentRagRequest updateReq = DocumentRagRequest.createUpdate(
+                document, advisor, "Tên mới", null, false
+        );
+        when(requestRepository.findByIdForUpdate(requestId)).thenReturn(Optional.of(updateReq));
+
+        assertThatThrownBy(() -> service.approveRequest(adminId, requestId))
+                .isInstanceOf(ResponseStatusException.class);
+        assertThat(updateReq.getStatus()).isEqualTo(DocumentRequestStatus.PENDING);
+        verify(document, never()).applyApprovedUpdate(any(), any(), any());
+        verifyNoInteractions(aiServiceClient);
+    }
+
+    @Test
+    void adminApprovesDeleteRequestArchivesDocumentAndDeletesVectors() {
+        prepareAdmin();
+        when(document.getId()).thenReturn(documentId);
+        when(document.isEligibleForRag()).thenReturn(true);
+        when(documentRepository.findByIdForUpdate(documentId)).thenReturn(Optional.of(document));
+
+        DocumentRagRequest deleteReq = DocumentRagRequest.createDelete(document, advisor);
+        when(requestRepository.findByIdForUpdate(requestId)).thenReturn(Optional.of(deleteReq));
+
+        service.approveRequest(adminId, requestId);
+
+        assertThat(deleteReq.getStatus()).isEqualTo(DocumentRequestStatus.APPROVED);
+        assertThat(deleteReq.getReviewedByAdmin()).isSameAs(admin);
+        verify(document).archive();
+        verify(aiServiceClient).deleteDocumentVectors(documentId.toString());
+    }
+
+    @Test
+    void adminApprovesDeleteRequestStillArchivesWhenVectorDeletionFails() {
+        prepareAdmin();
+        when(document.getId()).thenReturn(documentId);
+        when(document.isEligibleForRag()).thenReturn(true);
+        when(documentRepository.findByIdForUpdate(documentId)).thenReturn(Optional.of(document));
+        doThrow(new AiServiceException(HttpStatus.BAD_GATEWAY, "Qdrant unreachable"))
+                .when(aiServiceClient).deleteDocumentVectors(documentId.toString());
+
+        DocumentRagRequest deleteReq = DocumentRagRequest.createDelete(document, advisor);
+        when(requestRepository.findByIdForUpdate(requestId)).thenReturn(Optional.of(deleteReq));
+
+        service.approveRequest(adminId, requestId);
+
+        assertThat(deleteReq.getStatus()).isEqualTo(DocumentRequestStatus.APPROVED);
+        verify(document).archive();
+        verify(aiServiceClient).deleteDocumentVectors(documentId.toString());
     }
 }

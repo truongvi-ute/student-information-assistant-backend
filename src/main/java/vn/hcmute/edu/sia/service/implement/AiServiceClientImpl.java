@@ -73,6 +73,24 @@ public class AiServiceClientImpl implements AiServiceClient {
         return response;
     }
 
+    @Override
+    public void deleteDocumentVectors(String documentId) {
+        if (documentId == null || documentId.isBlank()) {
+            throw new IllegalArgumentException("Document ID must not be blank");
+        }
+
+        handleUpstreamErrors(
+                () -> {
+                    aiServiceRestClient.delete()
+                            .uri("/v1/documents/{documentId}", documentId.strip())
+                            .retrieve()
+                            .toBodilessEntity();
+                    return null;
+                },
+                "deleting document vectors"
+        );
+    }
+
     private <T> T executePost(
             String uri,
             Object body,

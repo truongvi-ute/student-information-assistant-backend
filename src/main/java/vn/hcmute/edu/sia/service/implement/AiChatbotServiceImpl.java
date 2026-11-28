@@ -39,6 +39,7 @@ import vn.hcmute.edu.sia.entity.Document;
 import vn.hcmute.edu.sia.entity.UserMessage;
 import vn.hcmute.edu.sia.enums.AccountAccessStatus;
 import vn.hcmute.edu.sia.enums.AccountRole;
+import vn.hcmute.edu.sia.enums.DocumentLifecycleStatus;
 import vn.hcmute.edu.sia.enums.MessageSenderType;
 import vn.hcmute.edu.sia.repository.AccountRepository;
 import vn.hcmute.edu.sia.repository.ChatConversationRepository;
@@ -154,6 +155,7 @@ public class AiChatbotServiceImpl implements AiChatbotService {
                 : null;
 
         List<AiServiceChatHistoryMessage> recentHistory = loadRecentHistory(conversation.getId());
+        List<String> eligibleDocumentIds = loadRagEligibleDocumentIds();
 
         UserMessage studentMessage = new UserMessage(
                 conversation.getId(),
@@ -163,7 +165,7 @@ public class AiChatbotServiceImpl implements AiChatbotService {
         );
 
         AiServiceChatResponse aiResponse = aiServiceClient.chat(
-                new AiServiceChatRequest(question, topK, filenameFilter, recentHistory)
+                new AiServiceChatRequest(question, topK, filenameFilter, recentHistory, eligibleDocumentIds)
         );
 
         Map<UUID, Document> documentsById = new HashMap<>();
@@ -274,6 +276,17 @@ public class AiChatbotServiceImpl implements AiChatbotService {
         return history;
     }
 
+    private List<String> loadRagEligibleDocumentIds() {
+        List<UUID> eligibleIds = documentRepository.findRagEligibleDocumentIds();
+        if (eligibleIds == null || eligibleIds.isEmpty()) {
+            return List.of();
+        }
+        return eligibleIds.stream()
+                .filter(Objects::nonNull)
+                .map(UUID::toString)
+                .toList();
+    }
+
     private String mapHistoryRole(MessageSenderType senderType) {
         if (senderType == null) {
             return null;
@@ -331,6 +344,11 @@ public class AiChatbotServiceImpl implements AiChatbotService {
             Document matchedDocument = resolvedDocumentId != null
                     ? documentsById.get(resolvedDocumentId)
                     : documentByFilename.get(filename);
+
+            if (matchedDocument != null
+                    && matchedDocument.getLifecycleStatus() == DocumentLifecycleStatus.ARCHIVED) {
+                continue;
+            }
 
             if (resolvedDocumentId == null && matchedDocument != null) {
                 resolvedDocumentId = matchedDocument.getId();

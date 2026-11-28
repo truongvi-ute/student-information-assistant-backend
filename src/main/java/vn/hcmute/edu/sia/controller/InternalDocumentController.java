@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import vn.hcmute.edu.sia.dto.internal.DocumentRagStatusCallbackRequest;
@@ -38,6 +39,7 @@ public class InternalDocumentController {
     @PostMapping("/{documentId}/rag-status")
     public ResponseEntity<Void> updateRagStatus(
             @PathVariable UUID documentId,
+            @RequestParam(required = false) UUID attemptId,
             @RequestHeader(value = INTERNAL_API_KEY_HEADER, required = false) String providedApiKey,
             @Valid @RequestBody DocumentRagStatusCallbackRequest request
     ) {
@@ -48,7 +50,11 @@ public class InternalDocumentController {
         String normalizedStatus = request.status().trim().toUpperCase(Locale.ROOT);
         switch (normalizedStatus) {
             case "READY" -> {
-                documentRagStatusService.markReady(documentId);
+                if (attemptId == null) {
+                    documentRagStatusService.markReady(documentId);
+                } else {
+                    documentRagStatusService.markReady(documentId, attemptId);
+                }
                 LOGGER.info(
                         "Marked document {} as READY (totalChunks={})",
                         documentId,
@@ -56,7 +62,11 @@ public class InternalDocumentController {
                 );
             }
             case "FAILED" -> {
-                documentRagStatusService.markFailed(documentId);
+                if (attemptId == null) {
+                    documentRagStatusService.markFailed(documentId);
+                } else {
+                    documentRagStatusService.markFailed(documentId, attemptId);
+                }
                 LOGGER.warn(
                         "Marked document {} as FAILED (reason={})",
                         documentId,

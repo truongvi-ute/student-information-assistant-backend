@@ -31,9 +31,15 @@ public class DocumentRagRequest {
     @Column(name = "document_rag_request_id", nullable = false, updatable = false)
     private UUID id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "document_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "document_id")
     private Document document;
+
+    @Column(name = "deleted_document_id")
+    private UUID deletedDocumentId;
+
+    @Column(name = "deleted_document_title", length = 255)
+    private String deletedDocumentTitle;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "requested_by_advisor_id", nullable = false)
@@ -77,6 +83,72 @@ public class DocumentRagRequest {
         );
         this.requestType = DocumentRequestType.ADD;
         this.status = DocumentRequestStatus.PENDING;
+    }
+
+    private DocumentRagRequest(
+            Document document,
+            Account requestedByAdvisor,
+            DocumentRequestType requestType,
+            String proposedTitle,
+            String proposedDescription,
+            Boolean proposedAllowDownload
+    ) {
+        this.document = Objects.requireNonNull(document, "Document must not be null");
+        this.requestedByAdvisor = Objects.requireNonNull(
+                requestedByAdvisor, "Advisor must not be null"
+        );
+        this.requestType = Objects.requireNonNull(requestType, "Request type must not be null");
+        this.status = DocumentRequestStatus.PENDING;
+        this.proposedTitle = proposedTitle;
+        this.proposedDescription = proposedDescription;
+        this.proposedAllowDownload = proposedAllowDownload;
+    }
+
+    public static DocumentRagRequest createAdd(Document document, Account requestedByAdvisor) {
+        return new DocumentRagRequest(document, requestedByAdvisor);
+    }
+
+    public static DocumentRagRequest createUpdate(
+            Document document,
+            Account requestedByAdvisor,
+            String proposedTitle,
+            String proposedDescription,
+            Boolean proposedAllowDownload
+    ) {
+        Objects.requireNonNull(document, "Document must not be null");
+        Objects.requireNonNull(requestedByAdvisor, "Advisor must not be null");
+        if (proposedTitle == null || proposedTitle.isBlank()) {
+            throw new IllegalArgumentException("Title must not be blank");
+        }
+        String normalizedTitle = proposedTitle.trim();
+        if (normalizedTitle.length() > 255) {
+            throw new IllegalArgumentException("Title must not exceed 255 characters");
+        }
+        if (proposedAllowDownload == null) {
+            throw new IllegalArgumentException("Allow download must not be null");
+        }
+        String normalizedDescription = (proposedDescription == null || proposedDescription.isBlank())
+                ? null
+                : proposedDescription.trim();
+        return new DocumentRagRequest(
+                document,
+                requestedByAdvisor,
+                DocumentRequestType.UPDATE,
+                normalizedTitle,
+                normalizedDescription,
+                proposedAllowDownload
+        );
+    }
+
+    public static DocumentRagRequest createDelete(Document document, Account requestedByAdvisor) {
+        return new DocumentRagRequest(
+                document,
+                requestedByAdvisor,
+                DocumentRequestType.DELETE,
+                null,
+                null,
+                null
+        );
     }
 
     public void approve(Account admin) {

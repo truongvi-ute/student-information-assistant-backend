@@ -36,9 +36,8 @@ class DocumentTest {
     }
 
     @Test
-    @DisplayName("Tạo Document thất bại khi uploader là Admin")
     void createDocument_Admin_ThrowsException() {
-        assertThatThrownBy(() -> new Document(admin, "Quy chế chung", null, false, "qc.docx", "path/qc.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 2048L, "b".repeat(64)))
+        assertThatThrownBy(() -> new Document(admin, "Quy chế chung", null, false, "qc.pdf", "path/qc.pdf", "application/pdf", 2048L, "b".repeat(64)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Only an advisor can upload a document");
     }
@@ -76,6 +75,45 @@ class DocumentTest {
         assertThat(doc.getLifecycleStatus()).isEqualTo(DocumentLifecycleStatus.ARCHIVED);
         assertThat(doc.getRagStatus()).isEqualTo(RagStatus.DISABLED);
         assertThat(doc.getArchivedAt()).isNotNull();
+        assertThat(doc.isDownloadable()).isFalse();
+    }
+
+    @Test
+    @DisplayName("Áp dụng UPDATE cập nhật đủ ba trường, cho phép xóa trắng mô tả và giữ nguyên ragStatus")
+    void applyApprovedUpdate_ClearsDescriptionAndPreservesRagStatus() {
+        Document doc = new Document(advisor, "Tên cũ", "Mô tả cũ", true, "f.pdf", "p", "application/pdf", 1024L, "a".repeat(64));
+        doc.completeRagIndexing();
+
+        doc.applyApprovedUpdate("  Tên mới  ", null, false);
+
+        assertThat(doc.getTitle()).isEqualTo("Tên mới");
+        assertThat(doc.getDescription()).isNull();
+        assertThat(doc.isAllowDownload()).isFalse();
+        assertThat(doc.getLifecycleStatus()).isEqualTo(DocumentLifecycleStatus.ACTIVE);
+        assertThat(doc.getRagStatus()).isEqualTo(RagStatus.READY);
+    }
+
+    @Test
+    @DisplayName("Từ chối applyApprovedUpdate nếu tài liệu không ở trạng thái ACTIVE")
+    void applyApprovedUpdate_NonActive_ThrowsIllegalState() {
+        Document draft = new Document(advisor, "Nháp", "Mô tả", true, "f.pdf", "p", "application/pdf", 1024L, "a".repeat(64));
+
+        assertThatThrownBy(() -> draft.applyApprovedUpdate("Tên mới", null, false))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    @DisplayName("Callback READY hoặc FAILED không làm thay đổi tài liệu đã ARCHIVED")
+    void archivedDocument_IgnoresRagCallbacks() {
+        Document doc = new Document(advisor, "Quy chế cũ", null, true, "f.pdf", "p", "application/pdf", 1024L, "a".repeat(64));
+        doc.completeRagIndexing();
+        doc.archive();
+
+        doc.completeRagIndexing();
+        doc.failRagIndexing();
+
+        assertThat(doc.getLifecycleStatus()).isEqualTo(DocumentLifecycleStatus.ARCHIVED);
+        assertThat(doc.getRagStatus()).isEqualTo(RagStatus.DISABLED);
         assertThat(doc.isDownloadable()).isFalse();
     }
 }

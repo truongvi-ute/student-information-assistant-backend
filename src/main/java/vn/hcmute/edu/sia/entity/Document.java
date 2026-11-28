@@ -67,6 +67,9 @@ public class Document {
     @Column(name = "rag_status", nullable = false, length = 20)
     private RagStatus ragStatus = RagStatus.NOT_INDEXED;
 
+    @Column(name = "rag_attempt_id")
+    private UUID ragAttemptId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "lifecycle_status", nullable = false, length = 20)
     private DocumentLifecycleStatus lifecycleStatus = DocumentLifecycleStatus.DRAFT;
@@ -97,7 +100,7 @@ public class Document {
             long sizeBytes,
             String checksumSha256
     ) {
-        if (uploadedBy == null || uploadedBy.getRole() != AccountRole.ADVISOR) {
+        if (uploadedBy == null || (uploadedBy.getRole() != AccountRole.ADVISOR)) {
             throw new IllegalArgumentException("Only an advisor can upload a document");
         }
         if (sizeBytes <= 0 || sizeBytes > MAX_SIZE_BYTES) {
@@ -121,7 +124,7 @@ public class Document {
     }
 
     public void updateDraftMetadata(String title, String description, Boolean allowDownload) {
-        if (this.lifecycleStatus != DocumentLifecycleStatus.DRAFT) {
+        if (this.lifecycleStatus != DocumentLifecycleStatus.DRAFT || this.ragStatus != RagStatus.NOT_INDEXED) {
             throw new IllegalStateException("Only draft documents can be updated directly");
         }
         this.title = requireText(title, "Title", 255);
@@ -132,27 +135,43 @@ public class Document {
     }
 
     public void applyApprovedUpdate(String title, String description, Boolean allowDownload) {
-        if (title != null && !title.isBlank()) {
-            this.title = requireText(title, "Title", 255);
+        if (this.lifecycleStatus != DocumentLifecycleStatus.ACTIVE) {
+            throw new IllegalStateException("Only active documents can be updated");
         }
-        if (description != null) {
-            this.description = normalizeOptionalText(description);
+        if (allowDownload == null) {
+            throw new IllegalArgumentException("Allow download must not be null");
         }
-        if (allowDownload != null) {
-            this.allowDownload = allowDownload;
-        }
+        this.title = requireText(title, "Title", 255);
+        this.description = normalizeOptionalText(description);
+        this.allowDownload = allowDownload;
     }
 
     public void startRagProcessing() {
         this.ragStatus = RagStatus.PROCESSING;
     }
 
+    public UUID retryRagProcessing() {
+        if (lifecycleStatus != DocumentLifecycleStatus.DRAFT || ragStatus != RagStatus.FAILED) {
+            throw new IllegalStateException("Only failed drafts can be processed again");
+        }
+        this.ragAttemptId = UUID.randomUUID();
+        startRagProcessing();
+        return ragAttemptId;
+    }
+
     public void completeRagIndexing() {
+        // ARCHIVED is terminal: prevent late/duplicate RAG callbacks from reactivating a retired document
+        if (this.lifecycleStatus == DocumentLifecycleStatus.ARCHIVED) {
+            return;
+        }
         this.ragStatus = RagStatus.READY;
         this.lifecycleStatus = DocumentLifecycleStatus.ACTIVE;
     }
 
     public void failRagIndexing() {
+        if (this.lifecycleStatus == DocumentLifecycleStatus.ARCHIVED) {
+            return;
+        }
         this.ragStatus = RagStatus.FAILED;
     }
 

@@ -36,12 +36,16 @@ import vn.hcmute.edu.sia.repository.DocumentRepository;
 import vn.hcmute.edu.sia.service.AiServiceClient;
 import vn.hcmute.edu.sia.service.DocumentRagRequestService;
 import vn.hcmute.edu.sia.service.DocumentRagStatusService;
+import java.util.Locale;
+import org.springframework.dao.DataIntegrityViolationException;
+import vn.hcmute.edu.sia.dto.request.CreateDocumentUpdateRequest;
 
 @Service
 @RequiredArgsConstructor
 public class DocumentRagRequestServiceImpl implements DocumentRagRequestService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DocumentRagRequestServiceImpl.class);
+    private static final String ONE_PENDING_INDEX_NAME = "uq_document_rag_requests_one_pending";
 
     private final AccountRepository accountRepository;
     private final DocumentRepository documentRepository;
@@ -87,7 +91,32 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
         if (hasExistingRequest) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "This document already has a pending or approved add request");
         }
-        return requestRepository.save(request).getId();
+        return savePendingRequest(request);
+    }
+
+    @Override
+    @Transactional
+    public UUID createUpdateRequest(
+            UUID advisorId,
+            UUID documentId,
+            CreateDocumentUpdateRequest updateRequest
+    ) {
+        throw new ResponseStatusException(HttpStatus.GONE, "Edit document metadata before submitting it for approval");
+    }
+
+    @Override
+    @Transactional
+    public UUID createDeleteRequest(UUID advisorId, UUID documentId) {
+        Account advisor = requireActiveAdvisor(advisorId);
+        Document document = requireOwnedLockedDocument(advisorId, documentId);
+
+        requireActiveDocument(document, "Only active documents are eligible for DELETE");
+
+        if (requestRepository.existsByDocumentAndStatus(document, DocumentRequestStatus.PENDING)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This document already has a pending request");
+        }
+
+        return savePendingRequest(DocumentRagRequest.createDelete(document, advisor));
     }
 
     @Override
@@ -128,22 +157,28 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
         DocumentRagRequest request = requestRepository.findByIdForUpdate(requestId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document request was not found"));
 
-        requirePendingAddRequest(request);
+        if (request.getStatus() != DocumentRequestStatus.PENDING) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Only pending requests can be processed");
+        }
         Document lockedDocument = documentRepository.findByIdForUpdate(request.getDocument().getId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document was not found"));
-        requireAddEligibleDocument(lockedDocument);
-        request.approve(admin);
 
-        if (request.getRequestType() == DocumentRequestType.ADD) {
-            Document document = lockedDocument;
-            document.startRagProcessing();
-            scheduleStorageIngestion(
-                    document.getId(),
-                    document.getStoragePath(),
-                    document.getOriginalFilename(),
-                    document.getTitle(),
-                    document.getDescription()
+        switch (request.getRequestType()) {
+            case ADD -> {
+                requireAddEligibleDocument(lockedDocument);
+                request.approve(admin);
+                lockedDocument.startRagProcessing();
+                scheduleIngestion(lockedDocument);
+            }
+            case UPDATE -> throw new ResponseStatusException(
+                    HttpStatus.CONFLICT, "Legacy UPDATE requests can only be rejected"
             );
+            case DELETE -> {
+                requireActiveDocument(lockedDocument, "Only active documents are eligible for DELETE");
+                request.approve(admin);
+                lockedDocument.archive();
+                scheduleVectorDeletion(lockedDocument.getId());
+            }
         }
     }
 
@@ -159,6 +194,16 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
 
         DocumentRagRequest request = requestRepository.findByIdForUpdate(requestId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document request was not found"));
+
+        if (request.getStatus() != DocumentRequestStatus.PENDING) {
+            throw new IllegalStateException("Only pending requests can be reviewed");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("Rejection reason must not be blank");
+        }
+        // Lock Document in the same request -> document order as approveRequest.
+        documentRepository.findByIdForUpdate(request.getDocument().getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document was not found"));
 
         request.reject(admin, reason);
     }
@@ -198,10 +243,87 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
     }
 
     private void requireAddEligibleDocument(Document document) {
-        if (document.getLifecycleStatus() != DocumentLifecycleStatus.DRAFT
+        if (document == null
+                || document.getLifecycleStatus() != DocumentLifecycleStatus.DRAFT
                 || document.getRagStatus() != RagStatus.NOT_INDEXED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Only unprocessed draft documents are eligible for ADD");
         }
+    }
+
+    private void requireActiveDocument(Document document, String errorMessage) {
+        if (!document.isEligibleForRag()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, errorMessage);
+        }
+    }
+
+    private Account requireActiveAdvisor(UUID advisorId) {
+        Account advisor = accountRepository.findById(advisorId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account was not found"));
+
+        if (advisor.getRole() != AccountRole.ADVISOR || advisor.getAccessStatus() != AccountAccessStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "An active advisor account is required");
+        }
+        return advisor;
+    }
+
+    private Document requireOwnedLockedDocument(UUID advisorId, UUID documentId) {
+        Document document = documentRepository.findByIdForUpdate(documentId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document was not found"));
+
+        if (!document.getUploadedBy().getId().equals(advisorId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You can only submit requests for your own documents");
+        }
+        return document;
+    }
+
+    private UUID savePendingRequest(DocumentRagRequest request) {
+        try {
+            DocumentRagRequest saved = requestRepository.save(request);
+            requestRepository.flush();
+            return saved.getId();
+        } catch (DataIntegrityViolationException exception) {
+            if (isOnePendingConstraintViolation(exception)) {
+                throw new ResponseStatusException(
+                        HttpStatus.CONFLICT,
+                        "This document already has a pending request",
+                        exception
+                );
+            }
+            throw exception;
+        }
+    }
+
+    private boolean isOnePendingConstraintViolation(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null
+                    && message.toLowerCase(Locale.ROOT)
+                            .contains(ONE_PENDING_INDEX_NAME)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    @Override
+    @Transactional
+    public void retryRag(UUID adminId, UUID documentId) {
+        Account admin = accountRepository.findById(adminId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Account was not found"));
+        if (admin.getRole() != AccountRole.ADMIN || admin.getAccessStatus() != AccountAccessStatus.ACTIVE) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "An active admin account is required");
+        }
+        Document document = documentRepository.findByIdForUpdate(documentId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document was not found"));
+        document.retryRagProcessing();
+        scheduleIngestion(document);
+    }
+
+    private void scheduleIngestion(Document document) {
+        scheduleStorageIngestion(document.getId(), document.getStoragePath(), document.getOriginalFilename(),
+                document.getTitle(), document.getDescription(), document.getRagAttemptId());
     }
 
     private void scheduleStorageIngestion(
@@ -209,18 +331,19 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
             String storagePath,
             String originalFilename,
             String title,
-            String description
+            String description,
+            UUID attemptId
     ) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    triggerStorageIngestion(documentId, storagePath, originalFilename, title, description);
+                    triggerStorageIngestion(documentId, storagePath, originalFilename, title, description, attemptId);
                 }
             });
             return;
         }
-        triggerStorageIngestion(documentId, storagePath, originalFilename, title, description);
+        triggerStorageIngestion(documentId, storagePath, originalFilename, title, description, attemptId);
     }
 
     private void triggerStorageIngestion(
@@ -228,7 +351,8 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
             String storagePath,
             String originalFilename,
             String title,
-            String description
+            String description,
+            UUID attemptId
     ) {
         if (aiServiceClient == null || documentId == null) {
             return;
@@ -238,6 +362,9 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
                 ? callbackBaseUrl.replaceAll("/+$", "")
                 : "http://localhost:8080";
         String callbackUrl = normalizedBaseUrl + "/api/internal/documents/" + documentId + "/rag-status";
+        if (attemptId != null) {
+            callbackUrl += "?attemptId=" + attemptId;
+        }
         Map<String, Object> metadata = new LinkedHashMap<>();
         if (title != null && !title.isBlank()) {
             metadata.put("title", title.strip());
@@ -257,8 +384,41 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
         } catch (RuntimeException exception) {
             LOGGER.error("Failed to trigger AI ingestion for document {}", documentId, exception);
             if (documentRagStatusService != null) {
-                documentRagStatusService.markFailed(documentId);
+                if (attemptId == null) {
+                    documentRagStatusService.markFailed(documentId);
+                } else {
+                    documentRagStatusService.markFailed(documentId, attemptId);
+                }
             }
+        }
+    }
+
+    private void scheduleVectorDeletion(UUID documentId) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    triggerVectorDeletion(documentId);
+                }
+            });
+            return;
+        }
+        triggerVectorDeletion(documentId);
+    }
+
+    private void triggerVectorDeletion(UUID documentId) {
+        if (aiServiceClient == null || documentId == null) {
+            return;
+        }
+
+        try {
+            aiServiceClient.deleteDocumentVectors(documentId.toString());
+        } catch (RuntimeException exception) {
+            LOGGER.error(
+                    "Failed to delete Qdrant vectors for archived document {}. Archived document remains disabled for RAG.",
+                    documentId,
+                    exception
+            );
         }
     }
 }

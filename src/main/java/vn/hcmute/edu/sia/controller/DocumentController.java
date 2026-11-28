@@ -14,13 +14,17 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import vn.hcmute.edu.sia.dto.internal.DownloadedDocumentFile;
 import vn.hcmute.edu.sia.dto.request.UploadDocumentRequest;
+import vn.hcmute.edu.sia.dto.request.CreateDocumentUpdateRequest;
 import vn.hcmute.edu.sia.dto.response.DocumentContentResponse;
 import vn.hcmute.edu.sia.dto.response.DocumentResponse;
 import vn.hcmute.edu.sia.dto.response.DocumentUploadResponse;
@@ -48,10 +52,33 @@ public class DocumentController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
+    @PutMapping("/{documentId}/draft")
+    @PreAuthorize("hasAnyRole('ADVISOR', 'ADMIN')")
+    public ResponseEntity<Void> updateDraft(
+            @AuthenticationPrincipal AccountPrincipal principal,
+            @PathVariable UUID documentId,
+            @Valid @RequestBody CreateDocumentUpdateRequest request
+    ) {
+        documentService.updateDraft(principal.getAccountId(), documentId, request);
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/{documentId}/draft")
+    @PreAuthorize("hasRole('ADVISOR')")
+    public ResponseEntity<Void> deleteDraft(
+            @AuthenticationPrincipal AccountPrincipal principal,
+            @PathVariable UUID documentId
+    ) {
+        documentService.deleteDraft(principal.getAccountId(), documentId);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping
     @PreAuthorize("hasAnyRole('ADVISOR', 'ADMIN')")
-    public ResponseEntity<List<DocumentResponse>> getDocuments() {
-        List<DocumentResponse> response = documentService.getDocuments();
+    public ResponseEntity<List<DocumentResponse>> getDocuments(
+            @AuthenticationPrincipal AccountPrincipal principal
+    ) {
+        List<DocumentResponse> response = documentService.getDocuments(principal.getAccountId());
         return ResponseEntity.ok(response);
     }
 
