@@ -56,7 +56,6 @@ class AiServiceClientTest {
                       "char_start": 120,
                       "char_end": 260,
                       "score": 0.912,
-                      "snippet": "Điều 14: Điều kiện xét tốt nghiệp...",
                       "content": "Điều 14: Điều kiện xét tốt nghiệp đại học chính quy."
                     }
                   ]

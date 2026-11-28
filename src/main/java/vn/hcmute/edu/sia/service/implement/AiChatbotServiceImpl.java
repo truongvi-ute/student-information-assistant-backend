@@ -361,9 +361,7 @@ public class AiChatbotServiceImpl implements AiChatbotService {
                     ? source.pageNumber()
                     : null;
 
-            String quotedContent = source.content() != null && !source.content().isBlank()
-                    ? source.content()
-                    : source.snippet();
+            String quotedContent = source.content() != null ? source.content() : "";
 
             citations.add(new Citation(
                     resolvedDocumentId,

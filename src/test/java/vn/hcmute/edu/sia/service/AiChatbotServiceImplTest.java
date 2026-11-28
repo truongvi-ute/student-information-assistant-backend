@@ -281,7 +281,6 @@ class AiChatbotServiceImplTest {
                 140,
                 234,
                 0.93,
-                "Điều 5. Sinh viên đạt GPA...",
                 fullChunkText
         );
         AiServiceChatResponse aiResponse = new AiServiceChatResponse(
@@ -421,7 +420,6 @@ class AiChatbotServiceImplTest {
                 0,
                 20,
                 0.88,
-                "Trích dẫn cũ",
                 "Nội dung cũ"
         );
         when(aiServiceClient.chat(any(AiServiceChatRequest.class))).thenReturn(

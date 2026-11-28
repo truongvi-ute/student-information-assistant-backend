@@ -10,7 +10,6 @@ public record AiServiceSourceCitation(
         @JsonProperty("char_start") Integer charStart,
         @JsonProperty("char_end") Integer charEnd,
         double score,
-        String snippet,
         String content
 ) {
     public AiServiceSourceCitation(
@@ -18,8 +17,8 @@ public record AiServiceSourceCitation(
             Integer pageNumber,
             int chunkIndex,
             double score,
-            String snippet
+            String content
     ) {
-        this(null, filename, pageNumber, chunkIndex, null, null, score, snippet, null);
+        this(null, filename, pageNumber, chunkIndex, null, null, score, content);
     }
 }
