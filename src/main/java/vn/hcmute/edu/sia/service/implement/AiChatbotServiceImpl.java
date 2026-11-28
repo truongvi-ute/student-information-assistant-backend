@@ -150,9 +150,6 @@ public class AiChatbotServiceImpl implements AiChatbotService {
         AIConversation conversation = requireOwnedConversation(studentId, conversationId);
 
         String question = request.question().strip();
-        String filenameFilter = request.filenameFilter() != null && !request.filenameFilter().isBlank()
-                ? request.filenameFilter().strip()
-                : null;
 
         List<AiServiceChatHistoryMessage> recentHistory = loadRecentHistory(conversation.getId());
         List<String> eligibleDocumentIds = loadRagEligibleDocumentIds();
@@ -165,7 +162,7 @@ public class AiChatbotServiceImpl implements AiChatbotService {
         );
 
         AiServiceChatResponse aiResponse = aiServiceClient.chat(
-                new AiServiceChatRequest(question, topK, filenameFilter, recentHistory, eligibleDocumentIds)
+                new AiServiceChatRequest(question, topK, recentHistory, eligibleDocumentIds)
         );
 
         Map<UUID, Document> documentsById = new HashMap<>();
@@ -364,9 +361,7 @@ public class AiChatbotServiceImpl implements AiChatbotService {
                     ? source.pageNumber()
                     : null;
 
-            String quotedContent = source.content() != null && !source.content().isBlank()
-                    ? source.content()
-                    : source.snippet();
+            String quotedContent = source.content() != null ? source.content() : "";
 
             citations.add(new Citation(
                     resolvedDocumentId,

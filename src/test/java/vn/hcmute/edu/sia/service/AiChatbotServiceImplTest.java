@@ -170,7 +170,7 @@ class AiChatbotServiceImplTest {
         AiChatbotTurnResponse turn = aiChatbotService.askQuestion(
                 studentId,
                 conversation.getId(),
-                new SendAiMessageRequest("Điều kiện nhận học bổng KKHT là gì?", 5, null)
+                new SendAiMessageRequest("Điều kiện nhận học bổng KKHT là gì?", 5)
         );
 
         ArgumentCaptor<List<ChatMessage>> savedCaptor = ArgumentCaptor.forClass(List.class);
@@ -216,7 +216,7 @@ class AiChatbotServiceImplTest {
         assertThatThrownBy(() -> aiChatbotService.askQuestion(
                 studentId,
                 conversation.getId(),
-                new SendAiMessageRequest("Câu hỏi", 5, null)
+                new SendAiMessageRequest("Câu hỏi", 5)
         )).isInstanceOf(AiServiceException.class);
 
         verify(messageRepository, never()).saveAll(anyList());
@@ -281,7 +281,6 @@ class AiChatbotServiceImplTest {
                 140,
                 234,
                 0.93,
-                "Điều 5. Sinh viên đạt GPA...",
                 fullChunkText
         );
         AiServiceChatResponse aiResponse = new AiServiceChatResponse(
@@ -294,7 +293,7 @@ class AiChatbotServiceImplTest {
         AiChatbotTurnResponse turn = aiChatbotService.askQuestion(
                 studentId,
                 conversation.getId(),
-                new SendAiMessageRequest("Điều kiện học bổng?", 5, null)
+                new SendAiMessageRequest("Điều kiện học bổng?", 5)
         );
 
         verify(documentRepository, never()).findByOriginalFilenameIn(anyCollection());
@@ -368,7 +367,7 @@ class AiChatbotServiceImplTest {
         aiChatbotService.askQuestion(
                 studentId,
                 conversation.getId(),
-                new SendAiMessageRequest("Còn chuẩn đầu ra của ngành đó?", 5, null)
+                new SendAiMessageRequest("Còn chuẩn đầu ra của ngành đó?", 5)
         );
 
         ArgumentCaptor<AiServiceChatRequest> requestCaptor = ArgumentCaptor.forClass(AiServiceChatRequest.class);
@@ -421,7 +420,6 @@ class AiChatbotServiceImplTest {
                 0,
                 20,
                 0.88,
-                "Trích dẫn cũ",
                 "Nội dung cũ"
         );
         when(aiServiceClient.chat(any(AiServiceChatRequest.class))).thenReturn(
@@ -431,7 +429,7 @@ class AiChatbotServiceImplTest {
         AiChatbotTurnResponse turn = aiChatbotService.askQuestion(
                 studentId,
                 conversation.getId(),
-                new SendAiMessageRequest("Hỏi quy chế?", 5, null)
+                new SendAiMessageRequest("Hỏi quy chế?", 5)
         );
 
         ArgumentCaptor<AiServiceChatRequest> requestCaptor = ArgumentCaptor.forClass(AiServiceChatRequest.class);

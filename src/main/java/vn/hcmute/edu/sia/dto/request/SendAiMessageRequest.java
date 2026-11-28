@@ -12,7 +12,5 @@ public record SendAiMessageRequest(
 
         @Min(value = 1, message = "topK must be between 1 and 20")
         @Max(value = 20, message = "topK must be between 1 and 20")
-        Integer topK,
-
-        String filenameFilter
+        Integer topK
 ) {}

@@ -56,7 +56,6 @@ class AiServiceClientTest {
                       "char_start": 120,
                       "char_end": 260,
                       "score": 0.912,
-                      "snippet": "Điều 14: Điều kiện xét tốt nghiệp...",
                       "content": "Điều 14: Điều kiện xét tốt nghiệp đại học chính quy."
                     }
                   ]
@@ -70,10 +69,11 @@ class AiServiceClientTest {
                 .andExpect(jsonPath("$.top_k").value(5))
                 .andExpect(jsonPath("$.history").isArray())
                 .andExpect(jsonPath("$.history.length()").value(0))
+                .andExpect(jsonPath("$.filename_filter").doesNotExist())
                 .andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON));
 
         AiServiceChatResponse response = aiServiceClient.chat(
-                new AiServiceChatRequest("Điều kiện tốt nghiệp là gì?", 5, null)
+                new AiServiceChatRequest("Điều kiện tốt nghiệp là gì?", 5)
         );
 
         mockServer.verify();
@@ -115,7 +115,6 @@ class AiServiceClientTest {
         AiServiceChatResponse response = aiServiceClient.chat(new AiServiceChatRequest(
                 "Còn chuẩn đầu ra của ngành đó?",
                 5,
-                null,
                 List.of(
                         new AiServiceChatHistoryMessage("user", "Ngành Kỹ thuật dữ liệu học mấy năm?"),
                         new AiServiceChatHistoryMessage("assistant", "Ngành Kỹ thuật dữ liệu đào tạo 4 năm.")
@@ -132,7 +131,7 @@ class AiServiceClientTest {
         mockServer.expect(requestTo("http://localhost:8000/v1/chat"))
                 .andRespond(withStatus(HttpStatus.GATEWAY_TIMEOUT));
 
-        assertThatThrownBy(() -> aiServiceClient.chat(new AiServiceChatRequest("Câu hỏi", 5, null)))
+        assertThatThrownBy(() -> aiServiceClient.chat(new AiServiceChatRequest("Câu hỏi", 5)))
                 .isInstanceOf(AiServiceException.class)
                 .extracting(ex -> ((AiServiceException) ex).getStatus())
                 .isEqualTo(HttpStatus.GATEWAY_TIMEOUT);
@@ -144,7 +143,7 @@ class AiServiceClientTest {
         mockServer.expect(requestTo("http://localhost:8000/v1/chat"))
                 .andRespond(withStatus(HttpStatus.BAD_GATEWAY));
 
-        assertThatThrownBy(() -> aiServiceClient.chat(new AiServiceChatRequest("Câu hỏi", 5, null)))
+        assertThatThrownBy(() -> aiServiceClient.chat(new AiServiceChatRequest("Câu hỏi", 5)))
                 .isInstanceOf(AiServiceException.class)
                 .extracting(ex -> ((AiServiceException) ex).getStatus())
                 .isEqualTo(HttpStatus.BAD_GATEWAY);
@@ -206,12 +205,12 @@ class AiServiceClientTest {
                 .andExpect(jsonPath("$.allowed_document_ids").isArray())
                 .andExpect(jsonPath("$.allowed_document_ids.length()").value(1))
                 .andExpect(jsonPath("$.allowed_document_ids[0]").value("doc-active-1"))
+                .andExpect(jsonPath("$.filename_filter").doesNotExist())
                 .andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON));
 
         aiServiceClient.chat(new AiServiceChatRequest(
                 "Quy chế?",
                 5,
-                null,
                 List.of(),
                 List.of("doc-active-1")
         ));
