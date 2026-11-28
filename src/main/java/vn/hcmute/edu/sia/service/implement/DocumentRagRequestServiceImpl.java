@@ -321,8 +321,7 @@ public class DocumentRagRequestServiceImpl implements DocumentRagRequestService 
         scheduleIngestion(document);
     }
 
-    @Override
-    public void scheduleIngestion(Document document) {
+    private void scheduleIngestion(Document document) {
         scheduleStorageIngestion(document.getId(), document.getStoragePath(), document.getOriginalFilename(),
                 document.getTitle(), document.getDescription(), document.getRagAttemptId());
     }

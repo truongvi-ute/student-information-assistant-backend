@@ -36,9 +36,10 @@ class DocumentTest {
     }
 
     @Test
-    void createDocument_Admin_Success() {
-        Document document = new Document(admin, "Quy chế chung", null, false, "qc.pdf", "path/qc.pdf", "application/pdf", 2048L, "b".repeat(64));
-        assertThat(document.getUploadedBy()).isSameAs(admin);
+    void createDocument_Admin_ThrowsException() {
+        assertThatThrownBy(() -> new Document(admin, "Quy chế chung", null, false, "qc.pdf", "path/qc.pdf", "application/pdf", 2048L, "b".repeat(64)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Only an advisor can upload a document");
     }
 
     @Test
@@ -46,7 +47,7 @@ class DocumentTest {
     void createDocument_Student_ThrowsException() {
         assertThatThrownBy(() -> new Document(student, "Tiêu đề", null, true, "f.pdf", "p", "application/pdf", 1024L, "a".repeat(64)))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Only an advisor or admin can upload a document");
+                .hasMessageContaining("Only an advisor can upload a document");
     }
 
     @Test

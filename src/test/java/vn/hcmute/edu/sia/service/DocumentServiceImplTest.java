@@ -56,9 +56,6 @@ class DocumentServiceImplTest {
     @Mock
     private DocumentUploadValidator documentUploadValidator;
 
-    @Mock
-    private DocumentRagRequestService ragRequestService;
-
     @InjectMocks
     private DocumentServiceImpl documentService;
 
@@ -95,35 +92,20 @@ class DocumentServiceImplTest {
         verify(documentRepository).saveAndFlush(any(Document.class));
     }
 
-    @Test
-    void adminUploadEntersProcessingAndSchedulesIngestion() throws IOException {
-        var admin = new Account("Admin", "admin@test.edu.vn", "hash",
-                AccountRole.ADMIN, AccountAccessStatus.ACTIVE, false);
-        UUID adminId = UUID.randomUUID();
-        when(accountRepository.findById(adminId)).thenReturn(Optional.of(admin));
-        when(documentUploadValidator.validateAndGetMimeType(file)).thenReturn("application/pdf");
-        when(documentStorageService.store(file, "application/pdf")).thenReturn(storedFile);
-        when(documentRepository.saveAndFlush(any(Document.class))).thenAnswer(invocation -> invocation.getArgument(0));
-
-        var response = documentService.uploadDocument(adminId, new UploadDocumentRequest(file, "Quy chế", null, true));
-
-        assertThat(response.lifecycleStatus()).isEqualTo(DocumentLifecycleStatus.DRAFT);
-        assertThat(response.ragStatus()).isEqualTo(RagStatus.PROCESSING);
-        verify(ragRequestService).scheduleIngestion(any(Document.class));
-    }
-
-    @Test
-    @DisplayName("Upload thất bại khi uploader là Student")
-    void uploadDocument_Student_ThrowsForbidden() {
-        Account student = new Account("Student", "student@test.edu.vn", "hash", AccountRole.STUDENT, AccountAccessStatus.ACTIVE, false);
-        UUID studentId = UUID.randomUUID();
-        when(accountRepository.findById(studentId)).thenReturn(Optional.of(student));
+    @ParameterizedTest
+    @EnumSource(value = AccountRole.class, names = {"ADMIN", "STUDENT"})
+    @DisplayName("Chỉ Advisor được tải tài liệu lên")
+    void uploadDocument_NonAdvisor_ThrowsForbidden(AccountRole role) {
+        UUID uploaderId = UUID.randomUUID();
+        Account uploader = new Account("Uploader", "uploader@test.edu.vn", "hash", role, AccountAccessStatus.ACTIVE, false);
+        when(accountRepository.findById(uploaderId)).thenReturn(Optional.of(uploader));
 
         UploadDocumentRequest request = new UploadDocumentRequest(file, "Quy chế", null, true);
 
-        assertThatThrownBy(() -> documentService.uploadDocument(studentId, request))
+        assertThatThrownBy(() -> documentService.uploadDocument(uploaderId, request))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+        verifyNoInteractions(documentUploadValidator, documentStorageService, documentRepository);
     }
 
     @Test

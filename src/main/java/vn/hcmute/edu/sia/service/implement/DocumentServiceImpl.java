@@ -29,7 +29,6 @@ import vn.hcmute.edu.sia.repository.AccountRepository;
 import vn.hcmute.edu.sia.repository.DocumentRepository;
 import vn.hcmute.edu.sia.repository.DocumentRagRequestRepository;
 import vn.hcmute.edu.sia.service.DocumentService;
-import vn.hcmute.edu.sia.service.DocumentRagRequestService;
 import vn.hcmute.edu.sia.service.DocumentStorageService;
 import vn.hcmute.edu.sia.validation.DocumentUploadValidator;
 
@@ -43,7 +42,6 @@ public class DocumentServiceImpl implements DocumentService {
     private final DocumentUploadValidator documentUploadValidator;
     private final DocumentRagRequestRepository requestRepository;
     private final JdbcTemplate jdbcTemplate;
-    private final DocumentRagRequestService ragRequestService;
 
     @Override
     @Transactional
@@ -53,10 +51,10 @@ public class DocumentServiceImpl implements DocumentService {
     ) {
         Account uploader = requireActiveAccount(uploaderId);
 
-        if (uploader.getRole() != AccountRole.ADVISOR && uploader.getRole() != AccountRole.ADMIN) {
+        if (uploader.getRole() != AccountRole.ADVISOR) {
             throw new ResponseStatusException(
                     HttpStatus.FORBIDDEN,
-                    "An active advisor or admin account is required to upload documents"
+                    "An active advisor account is required to upload documents"
             );
         }
 
@@ -89,14 +87,7 @@ public class DocumentServiceImpl implements DocumentService {
                     storedFile.checksumSha256()
             );
 
-            boolean directIngestion = uploader.getRole() == AccountRole.ADMIN;
-            if (directIngestion) {
-                document.startRagProcessing();
-            }
             Document savedDocument = documentRepository.saveAndFlush(document);
-            if (directIngestion) {
-                ragRequestService.scheduleIngestion(savedDocument);
-            }
             return DocumentUploadResponse.from(savedDocument);
         } catch (RuntimeException exception) {
             deleteStoredFileAfterFailure(storedFile, exception);
